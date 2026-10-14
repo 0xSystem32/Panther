@@ -10,12 +10,14 @@ import socket
 import struct
 import time
 import urllib.parse
+import uuid
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
 log = logging.getLogger("panther.discovery")
 SSDP_ADDR = ("239.255.255.250", 1900)
 MDNS_ADDR = ("224.0.0.251", 5353)
+WSD_ADDR = ("239.255.255.250", 3702)
 
 MDNS_SERVICES = [
     "_services._dns-sd._udp", "_ipp._tcp", "_ipps._tcp", "_printer._tcp", "_pdl-datastream._tcp",
@@ -218,9 +220,72 @@ def mdns_scan(timeout=4.0, iface_ip=None):
     return collect_mdns(packets)
 
 
+# ------------------------------------------------------------------ WS-Discovery (ONVIF, imprimantes, PC Windows)
+_WSD_PROBE = ('<?xml version="1.0" encoding="utf-8"?><soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope" '
+              'xmlns:wsa="http://schemas.xmlsoap.org/ws/2004/08/addressing" xmlns:wsd="http://schemas.xmlsoap.org/ws/2005/04/discovery">'
+              '<soap:Header><wsa:To>urn:schemas-xmlsoap-org:ws:2005:04:discovery</wsa:To>'
+              '<wsa:Action>http://schemas.xmlsoap.org/ws/2005/04/discovery/Probe</wsa:Action>'
+              '<wsa:MessageID>urn:uuid:{id}</wsa:MessageID></soap:Header><soap:Body><wsd:Probe/></soap:Body></soap:Envelope>')
+
+
+def _wsd_tag(text, tag):
+    m = re.search(rf"<(?:\w+:)?{tag}>(.*?)</(?:\w+:)?{tag}>", text, re.S)
+    return m.group(1).split() if m else []
+
+
+def parse_wsd(data):
+    """Réponse ProbeMatches -> {types, scopes, xaddrs, name, hardware}. Regex plutôt qu'un parseur XML : contenu non fiable."""
+    text = data.decode("utf-8", "ignore")[:20000]
+    types = [t.split(":")[-1][:60] for t in _wsd_tag(text, "Types")][:20]
+    scopes = [s[:200] for s in _wsd_tag(text, "Scopes")][:20]
+    xaddrs = [x[:200] for x in _wsd_tag(text, "XAddrs")][:10]
+    if not (types or scopes or xaddrs):
+        return {}
+
+    def onvif(key):
+        for s in scopes:
+            m = re.match(rf"onvif://www\.onvif\.org/{key}/(.+)", s, re.I)
+            if m:
+                return urllib.parse.unquote(m.group(1))[:60]
+        return ""
+    return {"types": types, "scopes": scopes, "xaddrs": xaddrs, "name": onvif("name"), "hardware": onvif("hardware")}
+
+
+def wsd_scan(timeout=3.0, iface_ip=None):
+    """{ip: {types, scopes, xaddrs, name, hardware}} pour les appareils qui répondent à la sonde WS-Discovery."""
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+    s.settimeout(0.5)
+    s.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 2)
+    if iface_ip:
+        s.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, socket.inet_aton(iface_ip))
+    found = {}
+    try:
+        probe = _WSD_PROBE.format(id=uuid.uuid4()).encode()
+        for _ in range(2):
+            s.sendto(probe, WSD_ADDR)
+        end = time.time() + timeout
+        while time.time() < end:
+            try:
+                data, (ip, _) = s.recvfrom(65535)
+            except socket.timeout:
+                continue
+            info = parse_wsd(data)
+            if info:
+                cur = found.setdefault(ip, {"types": [], "scopes": [], "xaddrs": [], "name": "", "hardware": ""})
+                for k in ("types", "scopes", "xaddrs"):
+                    cur[k] = list(dict.fromkeys(cur[k] + info[k]))[:20]
+                cur["name"], cur["hardware"] = cur["name"] or info["name"], cur["hardware"] or info["hardware"]
+    except OSError as e:
+        log.warning("WS-Discovery indisponible (multicast bloqué ?) : %s", e)
+    finally:
+        s.close()
+    return found
+
+
 def scan_all(iface_ip=None, ssdp_timeout=3.5, mdns_timeout=4.0):
-    """SSDP et mDNS en parallèle. Retourne (ssdp, mdns)."""
-    with ThreadPoolExecutor(2) as ex:
+    """SSDP, mDNS et WS-Discovery en parallèle. Retourne (ssdp, mdns, wsd)."""
+    with ThreadPoolExecutor(3) as ex:
         a = ex.submit(ssdp_scan, ssdp_timeout, iface_ip)
         b = ex.submit(mdns_scan, mdns_timeout, iface_ip)
-        return a.result(), b.result()
+        c = ex.submit(wsd_scan, ssdp_timeout, iface_ip)
+        return a.result(), b.result(), c.result()

@@ -97,6 +97,10 @@ def banner_findings(dev):
             out.append(finding("openssh-old", "faible", f"OpenSSH {v[0]}.{v[1]} annoncé (ancien)",
                                "Sur Linux, les correctifs peuvent être rétroportés : la version affichée ne prouve pas la faille.",
                                "Vérifier que le système est à jour.", int(port)))
+    cert = dev.get("cert") or {}
+    if cert.get("expired"):
+        out.append(finding("tls-expired", "faible", "Certificat HTTPS expiré", f"Expiré le {cert.get('not_after', '?')} : les navigateurs affichent un avertissement.",
+                           "Renouveler le certificat de l'appareil (ou le désactiver s'il n'est plus utilisé)."))
     server = (dev.get("ssdp") or {}).get("server", "")
     v = _version(server, r"Portable SDK for UPnP devices/(\d+)\.(\d+)\.(\d+)")
     if v and v < (1, 6, 18):
@@ -226,7 +230,7 @@ def analyze(dev, probes=None):
 
 
 _STATIC_TITLES = {"smb-device": "Partage SMB inattendu", "http-admin": "Administration en HTTP", "libupnp-old": "Pile UPnP ancienne",
-                  "openssh-old": "OpenSSH ancien"}
+                  "openssh-old": "OpenSSH ancien", "tls-expired": "Certificat HTTPS expiré"}
 
 
 def title_of(rule_id):

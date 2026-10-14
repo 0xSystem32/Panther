@@ -11,10 +11,12 @@ compare deux scans et exporte des rapports PDF. Le moteur de scan est **écrit �
 
 ## Fonctions
 
-- **Détection des appareils** : découverte TCP + UDP + table ARP, SSDP/UPnP, mDNS/Bonjour ; fabricant (base IEEE),
-  ports, bannières, système ; classification **par score** avec niveau de confiance et liste des indices
+- **Détection des appareils** : découverte ARP, SSDP/UPnP, mDNS/Bonjour, WS-Discovery (caméras ONVIF, imprimantes, PC Windows),
+  NetBIOS, titre et `realm` des pages HTTP(S), **certificat HTTPS** (marque, modèle, expiration), baux DHCP locaux ; fabricant (base IEEE), ports, bannières, système,
+  modèle lisible (« iPhone14,2 » → « iPhone 13 Pro ») ; classification **par score** avec niveau de confiance et liste des indices
   (« pourquoi c'est une imprimante »), un logo par type (téléphone, tablette, TV, imprimante, console, enceinte,
-  caméra, NAS, switch, routeur…). Nom et type corrigeables à la main.
+  caméra, NAS, switch, routeur…). Nom et type corrigeables à la main, et **règles de détection personnalisées** dans un fichier
+  JSON (`docs/REGLES.md`) : clic droit sur un appareil → « Créer une règle de détection… ».
 - **Deux cartes** : *étoile* autour de cette machine, ou *hiérarchique* (Internet → box → switch → appareils) ;
   votre chemin vers Internet est tracé en bleu, les positions des nœuds sont mémorisées.
 - **Plusieurs réseaux et VLAN** : plages saisies à la main ou détectées (routes, interfaces 802.1Q, passerelles),
@@ -78,8 +80,8 @@ pour le renommer, changer son type ou le marquer de confiance.
 | Module (`panther/`) | Rôle |
 |---|---|
 | `scanner.py` | moteur : découverte ARP/TCP, profils de profondeur, présence, annulation, analyse de chaque appareil |
-| `discovery.py` | SSDP/UPnP et mDNS/Bonjour (analyse des paquets écrite à la main) |
-| `fingerprint.py` | fabricant (OUI), système, classification par score |
+| `discovery.py`, `dhcp.py` | SSDP/UPnP, mDNS/Bonjour, WS-Discovery (analyse des paquets écrite à la main) ; baux DHCP |
+| `fingerprint.py`, `rules.py`, `models.py` | fabricant (OUI), système, classification par score ; règles personnalisées ; noms de modèles |
 | `networks.py`, `topology.py` | interfaces, VLAN, plages ; traceroute, voisins LLDP/CDP |
 | `snmp.py` | client SNMP v2c en lecture seule (BER écrit à la main) |
 | `security.py` | règles d'exposition et vérifications sans authentification |
@@ -89,7 +91,7 @@ pour le renommer, changer son type ou le marquer de confiance.
 | `server.py`, `static/` | interface web locale |
 
 Données : `~/.config/Panther/` (`panther.db` = historique, `devices.json` = noms et types choisis à la main,
-`panther.log` = journal d'erreurs : adresses et noms d'appareils, jamais de mot de passe ni de communauté SNMP ; `--verbose`
+`rules.json` = règles de détection, `panther.log` = journal d'erreurs : adresses et noms d'appareils, jamais de mot de passe ni de communauté SNMP ; `--verbose`
 pour le détail) ;
 `panther/oui.txt` = base des fabricants.
 

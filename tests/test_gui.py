@@ -12,7 +12,7 @@ if HAS_QT:
     from PyQt6.QtCore import QSettings, Qt
     from PyQt6.QtWidgets import QApplication
 
-    from panther import compare, gui, history, reportpdf, security, store
+    from panther import compare, gui, history, reportpdf, rules, security, store
 
 NET = "192.168.1.0/24"
 
@@ -43,6 +43,8 @@ class GuiTests(unittest.TestCase):
         history.PATH = os.path.join(self.tmp.name, "panther.db")
         store.PATH = os.path.join(self.tmp.name, "devices.json")
         QSettings.setPath(QSettings.Format.NativeFormat, QSettings.Scope.UserScope, self.tmp.name)
+        rules.PATH = os.path.join(self.tmp.name, "rules.json")                   # jamais les vraies règles de l'utilisateur
+        rules._cache.update(path=None, mtime=None, rs=rules.RuleSet())
         gui.T.update(gui.THEMES["dark"]); self.app.setStyleSheet(gui.make_style())
         self.boxes = []                                                          # boîtes de dialogue neutralisées (elles bloqueraient hors écran)
         for name in ("information", "warning", "critical"):
@@ -68,7 +70,7 @@ class GuiTests(unittest.TestCase):
     # --- fenêtre
     def test_window_builds_with_expected_menus_tabs_and_safe_defaults(self):
         w = self.w
-        self.assertEqual([a.text() for a in w.menuBar().actions()], ["Fichier", "Scan", "Affichage", "Sécurité", "Aide"])
+        self.assertEqual([a.text() for a in w.menuBar().actions()], ["Fichier", "Scan", "Affichage", "Sécurité", "Détection", "Aide"])
         self.assertEqual([w.tabs.tabText(i) for i in range(w.tabs.count())], ["Carte réseau", "Appareils", "Journal", "Sécurité"])
         self.assertFalse(w.security_on)                                          # l'analyse de sécurité est désactivée par défaut
         self.assertEqual(w.depth.currentData(), "normal")
@@ -383,6 +385,94 @@ class GuiTests(unittest.TestCase):
         self.assertEqual(gui.human_size(512), "512 o")
         self.assertEqual(gui.human_size(2048), "2.0 Ko")
         self.assertEqual(gui.human_size(5 * 1024 * 1024), "5.0 Mo")
+
+    # --- règles de détection personnalisées
+    def test_creating_a_rule_from_a_device_reclassifies_the_displayed_devices(self):
+        w = self.w
+        mystery = dev("192.168.1.80", "garage-1", "unknown", ports=[7777, 7778], vendor="")
+        mystery["confidence"], mystery["reasons"] = 0, ["aucun indice exploitable"]
+        self.scan([*network(), mystery, dev("192.168.1.81", "garage-2", "unknown", ports=[7777, 7778], vendor="")])
+        target = next(d for d in w.devices if d["hostname"] == "garage-1")
+        dlg = gui.RuleFromDeviceDialog(target, w)
+        self.assertTrue(dlg.buttons.button(gui.QDialogButtonBox.StandardButton.Ok).isEnabled())
+        dlg.kind.setCurrentIndex(dlg.kind.findData("camera"))
+        for k in ("hostname", "vendor", "mdns", "mac"):
+            dlg.boxes[k].setChecked(False)
+        dlg.boxes["ports"].setChecked(True)                                          # critère : ports 7777 et 7778 ouverts
+        self.assertIn("ports_all", dlg.view.text())
+        rules.add_rule(dlg.build())
+        w.reclassify_all()
+        types = {d["hostname"]: d["type"] for d in w.devices}
+        self.assertEqual((types["garage-1"], types["garage-2"]), ("camera", "camera"))   # la règle s'applique aussi à l'appareil jumeau
+        self.assertEqual(types["salon-tv"], "tv")                                        # les autres sont inchangés
+        self.assertIn("camera", {k for k, _ in w.view.legend})
+        reasons = next(d for d in w.devices if d["hostname"] == "garage-1")["reasons"]
+        self.assertTrue(any("règle" in r for r in reasons))
+
+    def test_rule_dialog_without_any_usable_criterion_cannot_be_saved(self):
+        w = self.w
+        bare = dev("192.168.1.90", "192.168.1.90", "unknown", vendor="MAC aléatoire", mac="7a:00:00:00:00:01")
+        bare["ports"], bare["mdns_services"] = [], []
+        dlg = gui.RuleFromDeviceDialog(bare, w)
+        self.assertFalse(dlg.buttons.button(gui.QDialogButtonBox.StandardButton.Ok).isEnabled())
+        self.assertIn("aucun critère", dlg.view.text())
+
+    def test_reclassify_keeps_manual_settings_and_skips_presence_data_and_this_machine(self):
+        self.scan(network())
+        w = self.w
+        tv = next(d for d in w.devices if d["hostname"] == "salon-tv")
+        w.commit_override(tv, "Télé", "console")
+        light = next(d for d in w.devices if d["hostname"] == "imprimante")
+        light["light"] = True
+        rules.add_rule({"name": "tout en nas", "type": "nas", "points": 100, "force": True, "match": {"os": "linux"}})
+        w.reclassify_all()
+        by = {d["hostname"] or d["ip"]: d for d in w.devices}
+        self.assertEqual(by["Télé"]["type"], "console")                              # le type choisi à la main résiste à la règle
+        self.assertEqual(by["imprimante"]["type"], "printer")                        # donnée de présence : non reclassée
+        self.assertEqual(by["debian"]["type"], "desktop")                            # cette machine : jamais
+        self.assertEqual(by["box"]["type"], "nas")                                   # appareil analysé : règle appliquée
+
+    def test_rules_dialog_lists_rules_with_device_counts_warnings_and_actions(self):
+        self.scan(network())
+        w = self.w
+        rules.add_rule({"name": "Télé du salon", "type": "tv", "points": 60, "match": {"hostname": "^salon"}})
+        with open(rules.PATH, encoding="utf-8") as f:
+            import json
+            data = json.load(f)
+        data["rules"].append({"name": "cassée", "type": "frigo", "match": {"os": "x"}})
+        with open(rules.PATH, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+        changed = []
+        dlg = gui.RulesDialog(w.devices, lambda: changed.append(1), w)
+        self.assertEqual(dlg.table.rowCount(), 1)
+        self.assertEqual([dlg.table.item(0, c).text() for c in (0, 1, 3)], ["Télé du salon", "TV / multimédia", "1"])   # 1 appareil concerné
+        self.assertFalse(dlg.warn.isHidden())
+        self.assertIn("cassée", dlg.warn.text())
+        dlg.table.selectRow(0)
+        dlg.remove()                                                                  # (la confirmation est neutralisée : « Oui »)
+        self.assertEqual(dlg.table.rowCount(), 0)
+        self.assertEqual(changed, [1])
+        self.assertTrue(dlg.example_btn.isEnabled() is False)                         # le fichier existe encore : pas d'exemple à créer
+
+    def test_example_creation_in_the_rules_dialog(self):
+        w = self.w
+        dlg = gui.RulesDialog([], lambda: None, w)
+        self.assertTrue(dlg.example_btn.isEnabled())                                  # pas de fichier : proposé
+        dlg.example()
+        self.assertEqual(dlg.table.rowCount(), 2)
+        self.assertFalse(dlg.example_btn.isEnabled())
+
+    def test_a_broken_rules_file_is_reported_at_startup_without_breaking_anything(self):
+        self.w.close()
+        with open(rules.PATH, "w") as f:
+            f.write("{pas du json")
+        rules._cache.update(path=None, mtime=None)
+        self.w = gui.Main(); self.w.notify = lambda *a: None
+        self.assertIn("Règles de détection", self.w.status.text())
+        self.assertEqual(rules.evaluate({"hostname": "x", "ports": []}), [])
+
+    def test_detection_menu_exists(self):
+        self.assertIn("Détection", [a.text() for a in self.w.menuBar().actions()])
 
     def test_scan_button_toggles_between_start_and_stop(self):
         w = self.w

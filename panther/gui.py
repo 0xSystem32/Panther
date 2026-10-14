@@ -15,7 +15,7 @@ import time
 from PyQt6.QtCore import QPointF, QRectF, QSettings, QSize, Qt, QThread, QTimer, QUrl, pyqtSignal
 from PyQt6.QtGui import (QAction, QActionGroup, QColor, QDesktopServices, QFont, QFontMetrics, QIcon, QImage, QPainter, QPainterPath, QPen,
                          QPixmap)
-from PyQt6.QtWidgets import (QApplication, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QMenu, QFormLayout, QFrame,
+from PyQt6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QMenu, QFormLayout, QFrame,
                              QGraphicsItem, QGraphicsLineItem, QGraphicsPathItem, QGraphicsScene,
                              QGraphicsView, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget, QListWidgetItem,
                              QMainWindow, QMessageBox, QProgressBar, QPushButton,
@@ -27,11 +27,13 @@ from . import fingerprint
 from . import history
 from . import identity
 from . import layout
+from . import models
 from . import networks
 from . import reportpdf
+from . import rules
 from . import security
 from . import store
-from .scanner import Scanner, local_network
+from .scanner import Scanner, local_network, reclassify
 
 log = logging.getLogger("panther.gui")
 LABELS = {"desktop": "Ordinateur", "laptop": "Portable", "phone": "Téléphone",
@@ -516,6 +518,161 @@ class DuplicatesDialog(QDialog):
         if self.merge_cb(new, old):
             self.items.pop(row)
             self.fill()
+
+
+class RuleFromDeviceDialog(QDialog):
+    """Crée une règle de détection à partir d'un appareil : on choisit le type et les critères à retenir."""
+
+    CRITERIA = (("hostname", "Nom de l'appareil"), ("vendor", "Fabricant"), ("ports", "Ports ouverts"),
+                ("mdns", "Services annoncés (mDNS)"), ("mac", "Préfixe de l'adresse MAC (fabricant)"))
+
+    def __init__(self, dev, parent=None):
+        super().__init__(parent)
+        self.dev = dev
+        self.setWindowTitle("Créer une règle de détection")
+        self.setMinimumWidth(520)
+        self.kind = QComboBox()
+        for k in fingerprint.KINDS:
+            self.kind.addItem(QIcon(type_pixmap(k, 20)), LABELS[k], k)
+        cur = dev.get("auto_type", dev["type"])
+        self.kind.setCurrentIndex(max(self.kind.findData(cur if cur != "unknown" else "iot"), 0))
+        self.name = QLineEdit(f"{dev['hostname'] or dev['ip']}")
+        self.boxes = {}
+        lay = QVBoxLayout(self); lay.setContentsMargins(20, 20, 20, 16); lay.setSpacing(12)
+        intro = QLabel(f"Quand un appareil ressemble à « {dev['hostname'] or dev['ip']} », Panther le classera dans le type choisi. "
+                       "Cochez ce qui doit être commun (plus de critères = règle plus précise).")
+        intro.setWordWrap(True); intro.setObjectName("muted")
+        form = QFormLayout(); form.addRow("Type", self.kind); form.addRow("Nom de la règle", self.name)
+        lay.addWidget(intro); lay.addLayout(form)
+        for key, label in self.CRITERIA:
+            b = QCheckBox(label); b.setChecked(key in ("hostname", "ports"))
+            b.stateChanged.connect(self.preview); self.boxes[key] = b; lay.addWidget(b)
+        self.kind.currentIndexChanged.connect(self.preview); self.name.textChanged.connect(self.preview)
+        self.view = QLabel(); self.view.setWordWrap(True); self.view.setTextFormat(Qt.TextFormat.PlainText)
+        self.view.setObjectName("muted")
+        self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        self.buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Enregistrer la règle")
+        self.buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("Annuler")
+        self.buttons.accepted.connect(self.accept); self.buttons.rejected.connect(self.reject)
+        lay.addWidget(self.view); lay.addWidget(self.buttons)
+        self.preview()
+
+    def criteria(self):
+        return {k for k, b in self.boxes.items() if b.isChecked()}
+
+    def build(self):
+        return rules.make_rule(self.dev, self.kind.currentData(), self.criteria(), self.name.text().strip() or None)
+
+    def preview(self, *_):
+        try:
+            r = self.build()
+            self.view.setText("Règle : " + rules.describe(r))
+            self.buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(True)
+        except rules.RuleError as e:
+            self.view.setText(str(e))
+            self.buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(False)
+
+
+class RulesDialog(QDialog):
+    """Règles de détection personnalisées : liste, avertissements, import / export, édition du fichier."""
+
+    def __init__(self, devices, on_change, parent=None):
+        super().__init__(parent)
+        self.devices, self.on_change = devices, on_change
+        self.setWindowTitle("Règles de détection personnalisées")
+        self.setMinimumSize(720, 520)
+        self.info = QLabel(); self.info.setWordWrap(True); self.info.setTextFormat(Qt.TextFormat.PlainText); self.info.setObjectName("muted")
+        self.warn = QLabel(); self.warn.setWordWrap(True); self.warn.setTextFormat(Qt.TextFormat.PlainText)
+        self.warn.setStyleSheet(f"color: {T['warn']};")
+        self.table = QTableWidget(0, 4)
+        self.table.setHorizontalHeaderLabels(["Règle", "Type", "Conditions", "Appareils"])
+        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.table.verticalHeader().hide(); self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.setShowGrid(False); self.table.setAlternatingRowColors(True)
+        btns = []
+        for text, fn in (("Modifier le fichier", self.open_file), ("Recharger", self.reload), ("Créer un exemple", self.example),
+                         ("Supprimer la règle", self.remove), ("Exporter…", self.export), ("Importer…", self.import_)):
+            b = QPushButton(text); b.clicked.connect(fn); btns.append(b)
+        self.example_btn = btns[2]
+        row = QHBoxLayout()
+        for b in btns:
+            row.addWidget(b)
+        close = QPushButton("Fermer"); close.setObjectName("primary"); close.clicked.connect(self.accept)
+        lay = QVBoxLayout(self); lay.setContentsMargins(20, 20, 20, 16); lay.setSpacing(12)
+        lay.addWidget(self.info); lay.addWidget(self.warn); lay.addWidget(self.table, 1); lay.addLayout(row)
+        end = QHBoxLayout(); end.addStretch(1); end.addWidget(close); lay.addLayout(end)
+        self.refresh()
+
+    def refresh(self):
+        rules._cache.update(path=None, mtime=None)  # relit le fichier
+        rs = rules.current()
+        try:
+            raw = {x.get("name"): x for x in (rules.read_data().get("rules", []) or []) if isinstance(x, dict)}
+        except rules.RuleError:
+            raw = {}
+        self.info.setText(f"Fichier : {rules.PATH}\n{plural(len(rs.rules), 'règle valide', 'règles valides')} · "
+                          f"{plural(len(rs.models), 'modèle personnalisé', 'modèles personnalisés')}. "
+                          "Chaque règle ajoute des points au type indiqué ; la détection intégrée garde son rôle (\"force\": true impose le type).")
+        self.warn.setText("\n".join("⚠ " + w for w in rs.warnings))
+        self.warn.setVisible(bool(rs.warnings))
+        t = self.table
+        t.setRowCount(len(rs.rules))
+        for r, rule in enumerate(rs.rules):
+            hits = sum(1 for d in self.devices if d.get("online", True) and not d.get("virtual")
+                       and any(e[0] == rule.kind and e[2] == rule.reason for e in rules.evaluate(d, rules.RuleSet([rule]))))
+            for c, v in enumerate((rule.name, LABELS.get(rule.kind, rule.kind), rules.describe(raw.get(rule.name, {})), str(hits))):
+                t.setItem(r, c, QTableWidgetItem(v))
+        t.setColumnWidth(0, 220); t.setColumnWidth(1, 130); t.setColumnWidth(2, 260)
+        self.example_btn.setEnabled(not os.path.exists(rules.PATH))
+
+    def selected_name(self):
+        row = self.table.currentRow()
+        return self.table.item(row, 0).text() if row >= 0 else None
+
+    def open_file(self):
+        if not os.path.exists(rules.PATH):
+            rules.create_example()
+        QDesktopServices.openUrl(QUrl.fromLocalFile(rules.PATH))
+
+    def reload(self):
+        self.refresh(); self.on_change()
+
+    def example(self):
+        try:
+            rules.create_example()
+        except OSError as e:
+            QMessageBox.warning(self, "Panther", f"Impossible d'écrire le fichier :\n{e}"); return
+        self.reload()
+
+    def remove(self):
+        name = self.selected_name()
+        if name and QMessageBox.question(self, "Supprimer", f"Supprimer la règle « {name} » ?") == QMessageBox.StandardButton.Yes:
+            try:
+                rules.remove_rule(name)
+            except (OSError, rules.RuleError) as e:
+                QMessageBox.warning(self, "Panther", f"Impossible de modifier le fichier :\n{e}"); return
+            self.reload()
+
+    def export(self):
+        path, _ = QFileDialog.getSaveFileName(self, "Exporter les règles", "regles-panther.json", "JSON (*.json)")
+        if path:
+            try:
+                rules.export_to(path)
+            except (OSError, rules.RuleError) as e:
+                QMessageBox.warning(self, "Panther", f"Export impossible :\n{e}")
+
+    def import_(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Importer des règles", "", "JSON (*.json)")
+        if not path:
+            return
+        try:
+            added, warnings = rules.import_from(path)
+        except (OSError, rules.RuleError) as e:
+            QMessageBox.warning(self, "Panther", f"Import impossible :\n{e}"); return
+        QMessageBox.information(self, "Import", f"{plural(added, 'règle importée', 'règles importées')}."
+                                + ("\n\nÉcartées :\n" + "\n".join(warnings) if warnings else ""))
+        self.reload()
 
 
 class DataDialog(QDialog):
@@ -1034,6 +1191,9 @@ class Main(QMainWindow):
 
         self.timer = QTimer(self); self.timer.timeout.connect(self.poll)
         self.update_netlabel()
+        w_rules = rules.current().warnings
+        if w_rules:
+            self.status.setText(f"Règles de détection : {plural(len(w_rules), 'avertissement', 'avertissements')} (menu Détection)")
         try:
             minutes = int(self.settings.value("auto_minutes", 0))
         except (TypeError, ValueError):
@@ -1090,6 +1250,9 @@ class Main(QMainWindow):
         m.addAction(QAction("Exporter le rapport (Markdown)…", self, triggered=self.export_security))
         m.addSeparator()
         m.addAction(QAction("Ce que fait l'analyse…", self, triggered=lambda: QMessageBox.information(self, "Analyse de sécurité", SECURITY_INFO)))
+        m = mb.addMenu("Détection")
+        m.addAction(QAction("Règles personnalisées…", self, triggered=self.open_rules))
+        m.addAction(QAction("Créer une règle pour l'appareil sélectionné…", self, triggered=lambda: self.create_rule(self.current_device())))
         m = mb.addMenu("Aide")
         m.addAction(QAction("Ouvrir le journal d'erreurs", self, triggered=self.open_log))
         m.addAction(QAction("À propos de Panther", self, triggered=lambda: QMessageBox.about(
@@ -1275,6 +1438,36 @@ class Main(QMainWindow):
             cb.setItemData(cb.count() - 1, f"{it['ip']}  ({it['cidr']})", Qt.ItemDataRole.ToolTipRole)
         cb.setCurrentIndex(max(cb.findData(cur), 0))
         cb.blockSignals(False)
+
+    def reclassify_all(self):
+        """Après un changement de règles : recalcule le type des appareils analysés (les appareils de présence gardent le leur)."""
+        ov = store.load()
+        try:
+            al = history.alias_map()
+        except (sqlite3.Error, OSError):
+            al = {}
+        for d in self.devices:
+            if d.get("online", True) and not d.get("light") and not d.get("virtual") and not d.get("is_self"):
+                reclassify(d, ov, al)
+        if self.devices:
+            self.rebuild(); self.update_count(); self.refresh_panel()
+
+    def open_rules(self):
+        RulesDialog(self.devices, self.reclassify_all, self).exec()
+        self.reclassify_all()
+
+    def create_rule(self, dev):
+        if not dev or dev.get("virtual"):
+            QMessageBox.information(self, "Règle de détection", "Sélectionnez d'abord un appareil.")
+            return
+        dlg = RuleFromDeviceDialog(dev, self)
+        if dlg.exec():
+            try:
+                rules.add_rule(dlg.build())
+            except (OSError, rules.RuleError) as e:
+                QMessageBox.warning(self, "Panther", f"Impossible d'enregistrer la règle :\n{e}"); return
+            self.reclassify_all()
+            self.status.setText("Règle enregistrée et appliquée aux appareils affichés")
 
     def apply_retention(self, scans_days, events_days):
         history.KEEP_SCANS_DAYS, history.KEEP_EVENTS_DAYS = int(scans_days), int(events_days)
@@ -1862,11 +2055,16 @@ class Main(QMainWindow):
             self.add_row("Adresse MAC", d["mac"], True)
             self.add_row("Réseau", d.get("network", "") + (f"  ·  VLAN {d['vlan']}" if d.get("vlan") else ""), True)
             self.add_row("Fabricant", d["vendor"])
+            c = d.get("cert") or {}
+            if c:
+                who = c.get("cn") or c.get("o") or "certificat sans nom"
+                self.add_row("Certificat HTTPS", who + (f"  ·  émis par {c['issuer']}" if c.get("issuer") and not c.get("self_signed") else "  ·  auto-signé")
+                             + (f"  ·  expiré le {c['not_after']}" if c.get("expired") else f"  ·  expire le {c['not_after']}" if c.get("not_after") else ""))
             if d.get("switch_port"):
                 self.add_row("Switch", f"{d.get('switch', '')}  ·  {d['switch_port']}")
             if d.get("path"):
                 self.add_row("Chemin", "  →  ".join(h or "*" for h in d["path"]), True)
-            self.add_row("Modèle", d.get("model", ""))
+            self.add_row("Modèle", models.describe(d.get("model", "")))
             self.add_row("Système", d["os"])
             self.add_row("TTL", str(d["ttl"]) if d["ttl"] else "")
             self.add_row("Services", "  ·  ".join(d["services"]))
@@ -1998,6 +2196,7 @@ class Main(QMainWindow):
         menu.addAction("Modifier le nom / le type…", lambda: self.edit_device(dev))
         menu.addAction("Retirer la confiance" if dev.get("trusted") else "Marquer comme appareil de confiance",
                        lambda: self.toggle_trust(dev))
+        menu.addAction("Créer une règle de détection…", lambda: self.create_rule(dev))
         if any(d is not dev and not d.get("virtual") and d.get("online", True) != dev.get("online", True) for d in self.devices):
             menu.addAction("Fusionner avec un appareil hors ligne…" if dev.get("online", True) else "Fusionner dans un appareil en ligne…",
                            lambda: self.open_merge(dev))

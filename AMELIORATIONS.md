@@ -27,9 +27,12 @@ effort **S** (< 1 h) · **M** (quelques heures) · **L** (plus d'une journée).
 - [ ] **P3 · S** Animer le recalcul final de la carte à la fin d'un scan (les nœuds sautent d'un coup à leur place définitive)
 
 ## 2. Détection des appareils
-- [ ] **P1 · M** Règles de détection extensibles par l'utilisateur (fichier, sans toucher au code) + export/import
-- [ ] **P2 · M** Nouvelles sources : titre/en-têtes HTTP(S), WS-Discovery (imprimantes et PC Windows), NBNS, bail DHCP (nom d'hôte)
-- [ ] **P2 · M** Correspondance des identifiants de modèle Apple/Samsung/Google (`iPhone14,2` → « iPhone 13 »)
+- [x] Règles de détection extensibles (`rules.json`, `docs/REGLES.md`) : 11 conditions, points ou `force`, création depuis un appareil (clic droit), liste avec nombre d'appareils concernés, import/export, fichier traité comme non fiable (motifs à risque refusés)
+- [x] Nouvelles sources : titre/`realm`/serveur HTTP et HTTPS, WS-Discovery (ONVIF, imprimantes, Windows), NetBIOS complet (groupe de travail, serveur de fichiers), baux DHCP locaux (dnsmasq, Pi-hole, isc-dhcp)
+- [x] Noms de modèles lisibles : table sûre (iPhone 8 à 15, iPad, Mac, Apple TV, HomePod) avec repli sur la famille, familles Samsung, modèles personnalisables (⚠ `iPhone14,2` est un iPhone 13 **Pro**, pas un 13 : vérifié par un test)
+- [ ] **P2 · S** Vérifier la table des modèles Apple sur de vrais appareils (et compléter : iPhone 16, Mac récents, Galaxy, Pixel)
+- [x] Certificat HTTPS comme indice (sujet, émetteur, noms alternatifs, expiration) : décodeur DER écrit à la main, fabricant de secours sans MAC, règle `cert`, constat « certificat expiré » ; vérifié sur la Livebox (modèle exact lu)
+- [ ] **P3 · S** Certains appareils ouvrent le port HTTPS mais n'en livrent ni page ni certificat (ex. un décodeur Sagemcom) : voir si une autre version de TLS ou une attente plus longue suffit
 - [ ] **P3 · L** Empreinte du système par réponses TCP/IP (TTL, fenêtre, options), au-delà du TTL
 - [ ] **P3 · L** Support IPv6 (découverte NDP, adresses multiples par appareil)
 

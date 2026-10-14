@@ -179,9 +179,10 @@ VENDOR_PRIORS = {"printer": (PRINTER_VENDORS, 25), "camera": (CAMERA_VENDORS, 40
 
 def _model_text(dev):
     txt = dev.get("mdns_txt") or {}
-    parts = [txt.get(k, "") for k in ("model", "md", "am", "ty", "product", "usb_mdl", "fn")]
+    parts = [txt.get(k, "") for k in ("model", "md", "am", "ty", "product", "usb_mdl", "fn", "rpmd")]
     ss = dev.get("ssdp") or {}
-    parts += [ss.get("model", ""), ss.get("friendly", ""), ss.get("dtype", "")]
+    wd = dev.get("wsd") or {}
+    parts += [ss.get("model", ""), ss.get("friendly", ""), ss.get("dtype", ""), wd.get("hardware", ""), wd.get("name", "")]
     return " ".join(p for p in parts if p).lower()
 
 
@@ -208,6 +209,18 @@ def classify_detail(dev):
         if svc in MDNS_HINTS:
             k, pts = MDNS_HINTS[svc]
             add(k, pts, f"annonce mDNS {svc}")
+    wtypes = " ".join((dev.get("wsd") or {}).get("types", [])).lower()  # WS-Discovery : types annoncés par l'appareil
+    if "networkvideotransmitter" in wtypes:
+        add("camera", 60, "WS-Discovery : caméra ONVIF")
+    if "printdevicetype" in wtypes or "printerservice" in wtypes:
+        add("printer", 60, "WS-Discovery : imprimante")
+    elif "scandevicetype" in wtypes or "scannerservice" in wtypes:
+        add("printer", 25, "WS-Discovery : scanner")
+    if "computer" in wtypes:
+        add("desktop", 40, "WS-Discovery : ordinateur")
+    nb = dev.get("netbios") or {}
+    if nb.get("file_server") or nb.get("workgroup"):
+        add("desktop", 20, "NetBIOS : poste Windows / partage Samba")
     ssdp = dev.get("ssdp") or {}
     dtype = (ssdp.get("dtype") or "").lower()
     if "printer" in dtype:
@@ -218,7 +231,8 @@ def classify_detail(dev):
         add("tv", 25, "UPnP : lecteur multimédia")
     seen = set()
     for label, text, factor in (("modèle", _model_text(dev), 1.0),
-                                ("nom", " ".join([dev.get("hostname") or ""] + dev.get("mdns_names", [])).lower(), 0.6)):
+                                ("nom", " ".join([dev.get("hostname") or ""] + dev.get("mdns_names", []) + [dev.get("http_info") or ""]).lower(), 0.6),
+                                ("certificat", ((dev.get("cert") or {}).get("indicators") or "").lower(), 0.6)):
         for pat, kind, pts in MODEL_PATTERNS:
             if kind not in seen and re.search(pat, text):
                 add(kind, pts * factor, f"{label} évocateur ({re.search(pat, text).group(0).strip()})")
@@ -241,6 +255,16 @@ def classify_detail(dev):
         add("desktop", 25, "système Windows")
     elif osn.startswith("macOS"):
         add("desktop", 15, "système macOS")
+    from . import rules  # import tardif : `rules` dépend de ce module
+    um = rules.user_model(dev.get("model", ""))  # modèle défini par l'utilisateur, avec un type
+    if um and um[1]:
+        add(um[1], 70, f"modèle « {um[0]} » (défini par vous)")
+    forced = None
+    for rk, pts, reason, force in rules.evaluate(dev):  # règles personnalisées de l'utilisateur
+        add(rk, pts, reason)
+        forced = forced or ((rk, reason) if force else None)
+    if forced:
+        return forced[0], 100, [forced[1]] + [r for r in why.get(forced[0], []) if r != forced[1]][:4]
     if not score:
         return "unknown", 0, ["aucun indice exploitable"]
     kind = max(score, key=score.get)

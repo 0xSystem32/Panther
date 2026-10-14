@@ -4,22 +4,27 @@ Découverte : sondes TCP + table ARP du noyau. Enrichissement : DNS inverse,
 NetBIOS, mDNS, scan de ports, bannières, TTL, empreinte OS, classification.
 """
 import glob
+import html
 import ipaddress
 import logging
 import re
 import socket
+import ssl
 import struct
 import subprocess
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
+from . import certs
+from . import dhcp
 from . import discovery
 from . import networks
 from . import security
 from . import snmp
 from . import topology
 from . import fingerprint
+from . import models
 from . import store
 
 log = logging.getLogger("panther.scanner")
@@ -189,16 +194,40 @@ def ping_ttl(ip):
         return None
 
 
+_nb_info = {}
+_nb_lock = threading.Lock()
+
+
+def parse_nbstat(data):
+    """Réponse NBSTAT -> {name, workgroup, file_server}. Bornes vérifiées : la réponse vient d'un appareil non fiable."""
+    if len(data) < 57:
+        return {}
+    count = data[56]
+    names, off = [], 57
+    for _ in range(min(count, 32)):
+        entry = data[off:off + 18]
+        if len(entry) < 18:
+            break
+        text = entry[:15].decode("ascii", "ignore").strip()
+        names.append((text, entry[15], bool(entry[16] & 0x80)))  # (nom, suffixe, groupe ?)
+        off += 18
+    uniq = [n for n, suf, grp in names if suf == 0x00 and not grp and n]
+    group = [n for n, suf, grp in names if suf == 0x00 and grp and n]
+    return {"name": uniq[0] if uniq else "", "workgroup": group[0] if group else "", "file_server": any(suf == 0x20 for _n, suf, _g in names)}
+
+
 def netbios_name(ip):
+    """Nom NetBIOS de l'appareil ; le groupe de travail et le rôle « serveur de fichiers » sont gardés dans `_nb_info`."""
     pkt = (b"\x82\x28\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x20CKAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\x00\x00\x21\x00\x01")
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.settimeout(0.8)
     try:
         s.sendto(pkt, (ip, 137))
-        data = s.recv(1024)
-        n = data[56]
-        if n:
-            return data[57:72].decode("ascii", "ignore").strip()
+        info = parse_nbstat(s.recv(1024))
+        if info:
+            with _nb_lock:
+                _nb_info[ip] = info
+            return info["name"]
     except OSError:
         pass
     finally:
@@ -254,23 +283,77 @@ def resolve_names(ip, timeout=1.5):
     return out.get("dns", ""), out.get("nb", ""), out.get("mdns", "")
 
 
-def grab_banner(ip, port):
+_cert_cache = {}  # (ip, port) -> résumé du certificat lu par grab_banner ; consommé par _inspect (même schéma que _nb_info)
+_cert_lock = threading.Lock()
+HTTP_PORTS = (80, 8000, 8008, 8080, 8081, 5000)
+TLS_PORTS = (443, 5001, 8443)
+_CTRL = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def _clean(text, limit=100):
+    """Texte venu du réseau : sans caractères de contrôle, entités HTML décodées, longueur bornée."""
+    return _CTRL.sub(" ", html.unescape(text)).strip()[:limit]
+
+
+def http_summary(head, body):
+    """« Serveur | titre de la page | realm » à partir d'une réponse HTTP (texte non fiable, jamais interprété)."""
+    server = re.search(r"^Server:[ \t]*(.+)$", head, re.I | re.M)
+    realm = re.search(r'^WWW-Authenticate:[^\r\n]*?realm="?([^"\r\n]+)', head, re.I | re.M)  # souvent le modèle exact (caméra, routeur)
+    title = re.search(r"<title[^>]*>(.*?)</title>", body, re.I | re.S)
+    parts = [_clean(m.group(1), 60) for m in (server, title) if m] + ([_clean("realm " + realm.group(1), 60)] if realm else [])
+    return " | ".join(p for p in parts if p)
+
+
+def grab_banner(ip, port, timeout=1.5):
+    """Bannière d'un service : première ligne (SSH, FTP) ou résumé HTTP/HTTPS. Aucune authentification n'est tentée.
+    Le certificat HTTPS n'est volontairement pas vérifié : les appareils du réseau local sont presque toujours auto-signés
+    et on ne fait que lire leur page d'accueil."""
     s = socket.socket()
-    s.settimeout(1.0)
+    s.settimeout(timeout)
     try:
         s.connect((ip, port))
-        if port in (80, 8080, 8008):
-            s.sendall(b"GET / HTTP/1.0\r\nHost: %s\r\n\r\n" % ip.encode())
-        data = s.recv(1024).decode("latin-1", "ignore")
-        if port in (21, 22):
-            return data.strip().splitlines()[0] if data else ""
-        m = re.search(r"Server:\s*(.+)", data, re.I)
-        t = re.search(r"<title>(.*?)</title>", data, re.I | re.S)
-        return " | ".join(x.group(1).strip()[:60] for x in (m, t) if x)
-    except OSError:
+        if port in TLS_PORTS:
+            ctx = ssl.create_default_context()
+            ctx.check_hostname, ctx.verify_mode = False, ssl.CERT_NONE
+            s = ctx.wrap_socket(s)
+            try:  # certificat présenté, même non vérifié : sert d'indice (marque, modèle) et de contrôle d'expiration
+                info = certs.summary(certs.parse_cert(s.getpeercert(binary_form=True) or b""))
+            except (ValueError, OSError):
+                info = {}
+            if info:
+                with _cert_lock:
+                    _cert_cache[(ip, port)] = info
+        web = port in HTTP_PORTS or port in TLS_PORTS
+        if web:
+            s.sendall(f"GET / HTTP/1.0\r\nHost: {ip}\r\nUser-Agent: Panther\r\nAccept: text/html\r\n\r\n".encode())
+        data, end = b"", time.time() + timeout
+        while len(data) < 8192 and time.time() < end:  # la page arrive souvent en plusieurs morceaux
+            try:
+                chunk = s.recv(2048)
+            except socket.timeout:
+                break
+            if not chunk:
+                break
+            data += chunk
+            if not web:
+                break
+        text = data.decode("latin-1", "ignore")
+        if not web:
+            return _clean(text.strip().splitlines()[0]) if text.strip() else ""
+        head, _, body = text.partition("\r\n\r\n")
+        return http_summary(head, body)
+    except OSError:  # inclut ssl.SSLError et les délais dépassés
         return ""
     finally:
         s.close()
+
+
+def reclassify(dev, overrides=None, aliases=None):
+    """Recalcule le type d'un appareil déjà analysé (après un changement de règles), en gardant les réglages manuels."""
+    store.apply(dev, {})  # retour aux valeurs automatiques
+    dev["type"], dev["confidence"], dev["reasons"] = fingerprint.classify_detail(dev)
+    store.apply(dev, store.load() if overrides is None else overrides, aliases)
+    return dev
 
 
 class Scanner:
@@ -407,17 +490,18 @@ class Scanner:
             # en mode présence, SSDP/mDNS ne servent que s'il y a un appareil inconnu à identifier
             unknown_local = [ip for ip in found if ip != net["ip"] and self.aliases.get(arp.get(ip, ""), arp.get(ip, "")) not in self.known and ipaddress.ip_address(ip) in local]
             if self.cancel.is_set() or (P["light"] and not unknown_local):
-                ssdp, mdns = {}, {}
+                ssdp, mdns, wsd = {}, {}, {}
             else:
                 full = PROFILES["normal"] if P["light"] else P
-                ssdp, mdns = discovery.scan_all(net["ip"], full["ssdp"], full["mdns"])  # multicast : réseau local
-            for ip in list(ssdp) + list(mdns):  # hôtes qui filtrent TCP mais annoncent des services
+                res = discovery.scan_all(net["ip"], full["ssdp"], full["mdns"])  # multicast : réseau local
+                ssdp, mdns, wsd = res[0], res[1], (res[2] if len(res) > 2 else {})
+            for ip in list(ssdp) + list(mdns) + list(wsd):  # hôtes qui filtrent TCP mais annoncent des services
                 try:
                     if ipaddress.ip_address(ip) in local:
                         found.add(ip)
                 except ValueError:
                     pass
-            extra = {"ssdp": ssdp, "mdns": mdns, "snmp_arp": snmp_arp}
+            extra = {"ssdp": ssdp, "mdns": mdns, "wsd": wsd, "snmp_arp": snmp_arp, "leases": dhcp.read_leases()}
             ips = sorted(found, key=lambda i: ipaddress.ip_address(i))
             paths = self._trace_paths(extra_nets, found)
             for n_ in extra_nets:
@@ -539,31 +623,44 @@ class Scanner:
         scan = tuple(P["scan_ports"]) + (tuple(p for p in security.EXTRA_PORTS if p not in P["scan_ports"]) if self.security else ())
         ports = scan_ports(ip, scan, P["port_timeout"]) if not me else []
         banners = {}
-        for p in ports if P["banners"] else []:
-            if p in (22, 80, 8080, 8008) or (self.security and p == 21):
-                b = grab_banner(ip, p)
-                if b:
-                    banners[p] = b
+        wanted = [p for p in ports if P["banners"] and (p == 22 or p in HTTP_PORTS or p in TLS_PORTS or (self.security and p == 21))]
+        if wanted:
+            with ThreadPoolExecutor(min(4, len(wanted))) as bx:
+                for p, b in zip(wanted, bx.map(lambda p_: grab_banner(ip, p_), wanted)):
+                    if b:
+                        banners[p] = b
+        with _cert_lock:  # certificats lus pendant la prise des bannières HTTPS
+            found_certs = [_cert_cache.pop((ip, p)) for p in sorted(TLS_PORTS) if (ip, p) in _cert_cache]
+        cert_info = found_certs[0] if found_certs else {}
+        org = cert_info.get("o", "")
+        cert_vendor = fingerprint.shorten_vendor(org) if org and not certs._NOISE.match(org) else ""  # dernier recours (réseau routé : pas de MAC)
         md = extra["mdns"].get(ip, {})
         ss = extra["ssdp"].get(ip, {})
+        wd = extra.get("wsd", {}).get(ip, {})
         names = sorted(md.get("names", []))
         dns, nb_name, mdns_n = ("", "", "") if me else f_names.result()
-        hostname = dns or nb_name or md.get("host") or mdns_n or (names[0] if names else "") or ss.get("friendly", "")
+        hostname = (dns or nb_name or md.get("host") or mdns_n or (names[0] if names else "") or ss.get("friendly", "")
+                    or extra.get("leases", {}).get(mac, ""))
+        with _nb_lock:
+            netbios = _nb_info.pop(ip, {})
         if me:
             hostname = socket.gethostname()
         ttl = 64 if me else f_ttl.result()
         bg.shutdown(wait=False)
-        vendor = fingerprint.vendor_of(mac) or ss.get("manufacturer", "")
+        vendor = fingerprint.vendor_of(mac) or ss.get("manufacturer", "") or wd.get("name", "") or cert_vendor
         dev = {"ip": ip, "mac": mac, "vendor": vendor, "hostname": hostname,
                "ports": ports, "services": [PORT_NAMES.get(p, str(p)) for p in ports],
                "banners": {str(k): v for k, v in banners.items()}, "ttl": ttl,
                "is_gateway": ip == net["gateway"], "is_self": me,
                "random_mac": fingerprint.is_random_mac(mac), "online": True,
                "mdns_services": sorted(md.get("services", [])), "mdns_names": names,
-               "mdns_txt": md.get("txt", {}), "ssdp": ss}
+               "mdns_txt": md.get("txt", {}), "ssdp": ss, "wsd": wd, "netbios": netbios, "cert": cert_info}
+        dev["http_info"] = " ".join(v for k, v in banners.items() if k in HTTP_PORTS or k in TLS_PORTS)[:300]
         model_text = fingerprint._model_text(dev)
-        dev["model"] = (md.get("txt", {}).get("model") or md.get("txt", {}).get("md")
-                        or md.get("txt", {}).get("ty") or ss.get("model", ""))
+        dev["model"] = (md.get("txt", {}).get("model") or md.get("txt", {}).get("md") or md.get("txt", {}).get("rpmd")
+                        or md.get("txt", {}).get("ty") or ss.get("model", "") or wd.get("hardware", ""))
+        friendly = models.friendly(dev["model"])
+        dev["model_name"] = friendly["name"] if friendly else ""
         dev["os"] = "Linux (cette machine)" if me else fingerprint.guess_os(
             ttl, ports, vendor, hostname, banners, model_text)
         if me:
