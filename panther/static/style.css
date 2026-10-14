@@ -1,0 +1,22 @@
+:root{--bg:#0f1420;--card:#171e2e;--line:#2a3550;--fg:#e6ebf5;--mut:#8a97b3;--acc:#4da3ff;--ok:#3ecf8e}
+@media (prefers-color-scheme:light){:root{--bg:#f3f5fa;--card:#fff;--line:#c9d2e3;--fg:#18202f;--mut:#5b6882;--acc:#1a73e8;--ok:#14a06a}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px system-ui,sans-serif}
+header{display:flex;justify-content:space-between;align-items:center;padding:14px 20px;gap:12px;flex-wrap:wrap}
+h1{margin:0;font-size:20px}h1 span{color:var(--mut);font-size:14px;font-weight:400;margin-left:8px}
+.actions{display:flex;align-items:center;gap:14px;color:var(--mut)}
+button{background:var(--acc);color:#fff;border:0;border-radius:8px;padding:9px 16px;font-size:14px;cursor:pointer}
+button:disabled{opacity:.5;cursor:wait}
+#bar{height:3px;background:var(--line)}#fill{height:100%;width:0;background:var(--ok);transition:width .4s}
+main{display:grid;grid-template-columns:1fr 300px;gap:16px;padding:16px 20px}
+@media(max-width:800px){main{grid-template-columns:1fr}}
+#map{width:100%;background:var(--card);border:1px solid var(--line);border-radius:12px;height:calc(100vh - 120px);min-height:420px}
+#panel{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;align-self:start}
+.hint{color:var(--mut);margin:0}dl{margin:0;display:grid;grid-template-columns:90px 1fr;gap:6px 10px}
+dt{color:var(--mut)}dd{margin:0;word-break:break-word}h2{margin:0 0 12px;font-size:17px}
+.tag{display:inline-block;background:var(--line);border-radius:5px;padding:1px 7px;margin:0 4px 4px 0;font-size:12px}
+.node{cursor:pointer}.node text{fill:var(--fg);font-size:12px;text-anchor:middle}.node .sub{fill:var(--mut);font-size:11px}
+.node circle{fill:var(--bg);stroke:var(--acc);stroke-width:2}.node.sel circle{stroke:var(--ok);stroke-width:3}
+.node svg *,.ico{fill:none;stroke:var(--fg);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.link{stroke:var(--line);stroke-width:1.5}.link.gw{stroke:var(--acc);stroke-width:2.2}
+@keyframes pop{from{opacity:0;transform:scale(.4)}to{opacity:1;transform:scale(1)}}
+.node{animation:pop .4s ease-out;transform-box:fill-box;transform-origin:center}

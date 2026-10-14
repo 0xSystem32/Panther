@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Panther
+GenericName=Scanner de réseau
+Comment=Scanner et cartographie du réseau local
+Exec=panther
+Icon=panther
+Terminal=false
+Categories=Network;Monitor;
+Keywords=réseau;scan;lan;vlan;nmap;
+StartupWMClass=panther

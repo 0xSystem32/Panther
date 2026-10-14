@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "panther-netscan"
+dynamic = ["version"]
+description = "Scanner et cartographie de réseau local : détection des appareils, VLAN, historique, analyse d'exposition en lecture seule"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
+dependencies = ["PyQt6>=6.5"]
+keywords = ["network", "scanner", "lan", "monitoring", "nmap-alternative", "vlan", "snmp", "lldp"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: X11 Applications :: Qt",
+    "Intended Audience :: System Administrators",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Topic :: System :: Networking :: Monitoring",
+]
+
+[project.scripts]
+panther = "panther.__main__:main"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.dynamic]
+version = { attr = "panther.__version__" }
+
+[tool.setuptools.packages.find]
+include = ["panther*"]
+
+[tool.setuptools.package-data]
+panther = ["oui.txt", "static/*", "assets/*"]
