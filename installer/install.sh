@@ -1,5 +1,5 @@
 #!/bin/sh
-# Installateur Panther pour Linux et macOS (sans droits administrateur).
+# Installateur Panther pour Linux (sans droits administrateur).
 #   ./installer/install.sh                 installe dans ~/.local/share/panther
 #   ./installer/install.sh --uninstall     désinstalle (la configuration ~/.config/Panther est conservée)
 #   ./installer/install.sh --prefix DIR    autre dossier d'installation
@@ -20,15 +20,11 @@ while [ $# -gt 0 ]; do
   shift
 done
 
-OS=$(uname -s)
-case "$OS" in
-  Linux)  APPS="${XDG_DATA_HOME:-$HOME/.local/share}/applications" ;;
-  Darwin) APPS="$HOME/Applications" ;;
-  *) echo "Système non géré : $OS (voir installer/install.ps1 pour Windows)" >&2; exit 1 ;;
-esac
+[ "$(uname -s)" = Linux ] || { echo "Panther ne fonctionne que sous Linux pour le moment." >&2; exit 1; }
+APPS="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
 
 if [ "$ACTION" = uninstall ]; then
-  rm -rf "$PREFIX" "$BIN/panther" "$APPS/panther.desktop" "$APPS/Panther.command"
+  rm -rf "$PREFIX" "$BIN/panther" "$APPS/panther.desktop"
   echo "Panther désinstallé. Vos réglages et l'historique restent dans ~/.config/Panther (à supprimer à la main si besoin)."
   exit 0
 fi
@@ -55,10 +51,9 @@ exec "$PREFIX/venv/bin/python" -m panther "\$@"
 EOF
 chmod 755 "$BIN/panther"
 
-if [ "$OS" = Linux ]; then
-  ICON="$PREFIX/panther.svg"
-  cp "$ROOT/panther/assets/panther.svg" "$ICON"
-  cat > "$APPS/panther.desktop" <<EOF
+ICON="$PREFIX/panther.svg"
+cp "$ROOT/panther/assets/panther.svg" "$ICON"
+cat > "$APPS/panther.desktop" <<EOF
 [Desktop Entry]
 Type=Application
 Name=Panther
@@ -68,11 +63,6 @@ Icon=$ICON
 Categories=Network;System;
 Terminal=false
 EOF
-else
-  printf '#!/bin/sh\nexec "%s/panther"\n' "$BIN" > "$APPS/Panther.command"
-  chmod 755 "$APPS/Panther.command"
-  echo "Note : le scan réseau n'est géré que sous Linux ; sous macOS l'interface et le mode --demo fonctionnent."
-fi
 
 echo "Terminé. Lancez « panther » (ou « panther --demo » pour essayer sans rien scanner)."
 case ":$PATH:" in *":$BIN:"*) ;; *) echo "Ajoutez $BIN à votre PATH pour lancer « panther » depuis un terminal." ;; esac

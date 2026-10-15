@@ -53,9 +53,8 @@ if __name__ == "__main__":
 
 class InstallerTests(unittest.TestCase):
     def test_scripts_exist_and_have_no_personal_data(self):
-        for name in ("install.sh", "install.ps1"):
-            text = read("installer", name)
-            self.assertNotRegex(text, r"/home/\w|C:\\Users\\\w|@\w+\.\w+", name)
+        text = read("installer", "install.sh")
+        self.assertNotRegex(text, r"/home/\w|@\w+\.\w+")
 
     def test_unix_installer_installs_and_uninstalls_in_a_private_home(self):
         import shutil

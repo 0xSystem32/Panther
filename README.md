@@ -84,11 +84,8 @@ Linux, Python ≥ 3.12. No root needed to scan (except for LLDP/CDP listening, s
 
 **Installer script** (no administrator rights; private virtual environment, launcher, menu entry)
 
-    ./installer/install.sh               # Linux and macOS
-    powershell -ExecutionPolicy Bypass -File installer\install.ps1    # Windows
+    ./installer/install.sh
     ./installer/install.sh --uninstall   # your settings in ~/.config/Panther are kept
-
-Network scanning itself only works on Linux for now; on macOS and Windows the installer gives you the interface and `panther --demo`. The macOS and Windows scripts have not been run on those systems yet.
 
 **With pipx**
 
