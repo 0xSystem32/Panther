@@ -27,6 +27,7 @@ compare deux scans et exporte des rapports PDF. Le moteur de scan est **écrit �
 - **Plusieurs réseaux et VLAN** : plages saisies à la main ou détectées (routes, interfaces 802.1Q, passerelles),
   chemin traceroute, avertissement si un réseau ne répond pas, **SNMP** en lecture seule (adresses MAC et ports de
   switch d'autres VLAN), voisins **LLDP/CDP**.
+- **IPv6 (adresses)** : les adresses IPv6 de chaque appareil (lues dans la table des voisins du noyau après un ping multicast) sont affichées dans le panneau et exportées ; la découverte reste en IPv4.
 - **Profils de scan** : plages, profondeur, interface, hôtes SNMP et options enregistrés sous un nom (Scan → Profils de scan) ; un profil ne contient jamais de secret et ne donne jamais le consentement à l'analyse de sécurité.
 - **Surveillance** : découverte par **ARP** (scan normal ≈ 10 s), scan de **présence** (≈ 2 s, presque aucun trafic) qui réutilise
   les détails du dernier scan complet, arrêt du scan, profondeur rapide / normal / approfondi, scan automatique

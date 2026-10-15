@@ -140,6 +140,40 @@ def arp_discover(iface, hosts, profile, cancel, progress=None, sleep=time.sleep,
     return alive, maybes, seen_any
 
 
+_NEIGH6 = re.compile(r"^([0-9a-fA-F:]+)(?: dev \S+)?(?: lladdr (\S+))?(?: router)?(?: proxy)?\s+([A-Z]+)\s*$")
+
+
+def parse_ipv6_neighbors(text, limit=4):
+    """Sortie de `ip -6 neigh show` -> {mac: [adresses IPv6]} (globales d'abord, 4 au plus par appareil). Les entrées sans réponse
+    (FAILED, INCOMPLETE), sans MAC ou multicast sont ignorées ; le texte vient d'une commande locale mais reste borné et validé."""
+    out: dict = {}
+    for line in text.splitlines()[:2000]:
+        m = _NEIGH6.match(line.strip())
+        if not m or not m.group(2) or m.group(3) in ("FAILED", "INCOMPLETE"):
+            continue
+        try:
+            addr = ipaddress.IPv6Address(m.group(1))
+        except ValueError:
+            continue
+        if addr.is_multicast or addr.is_unspecified or addr.is_loopback:
+            continue
+        out.setdefault(m.group(2).lower(), []).append(str(addr))
+    return {mac: sorted(set(a), key=lambda x: (x.startswith("fe80"), x))[:limit] for mac, a in out.items()}
+
+
+def ipv6_neighbors(iface):
+    """Voisins IPv6 connus du noyau : {mac: [adresses]}. Lecture seule."""
+    return parse_ipv6_neighbors(networks._run(["ip", "-6", "neigh", "show", "dev", iface]))
+
+
+def ipv6_nudge(iface, timeout=3):
+    """Un seul ping vers « tous les nœuds » (ff02::1) : les appareils IPv6 répondent et entrent dans la table des voisins du noyau."""
+    try:
+        subprocess.run(["ping", "-6", "-c1", "-W1", f"ff02::1%{iface}"], capture_output=True, timeout=timeout)
+    except (OSError, subprocess.SubprocessError):
+        log.debug("Ping IPv6 multicast impossible", exc_info=True)
+
+
 def tcp_open(ip, port, timeout=0.6):
     s = socket.socket()
     s.settimeout(timeout)
@@ -582,7 +616,10 @@ class Scanner:
                         found.add(ip)
                 except ValueError:
                     pass
-            extra = {"ssdp": ssdp, "mdns": mdns, "wsd": wsd, "snmp_arp": snmp_arp, "leases": dhcp.read_leases()}
+            if not P["light"]:
+                ipv6_nudge(net["iface"])  # scan complet : un ping multicast fait connaître les adresses IPv6 des appareils
+            extra = {"ssdp": ssdp, "mdns": mdns, "wsd": wsd, "snmp_arp": snmp_arp, "leases": dhcp.read_leases(),
+                     "ipv6": ipv6_neighbors(net["iface"])}
             ips = sorted(found, key=lambda i: ipaddress.ip_address(i))
             paths = {} if P.get("passive") else self._trace_paths(extra_nets, found)
             for n_ in extra_nets:
@@ -700,7 +737,9 @@ class Scanner:
         if P["light"]:
             rec = None if me else (self.known.get(self.aliases.get(mac, mac)) or self.known.get("ip:" + ip))
             if rec:
-                return self._known_device(ip, net, mac, rec)
+                dev = self._known_device(ip, net, mac, rec)
+                dev["ipv6"] = extra.get("ipv6", {}).get(mac, []) if mac else []
+                return dev
             if not P.get("passive"):
                 P = PROFILES["normal"]  # appareil inconnu : analyse complète, comme un scan normal
         active = not me and not P.get("passive")  # écoute seule : rien n'est envoyé à l'appareil
@@ -743,7 +782,8 @@ class Scanner:
                "is_gateway": ip == net["gateway"], "is_self": me,
                "random_mac": fingerprint.is_random_mac(mac), "online": True,
                "mdns_services": sorted(md.get("services", [])), "mdns_names": names,
-               "mdns_txt": md.get("txt", {}), "ssdp": ss, "wsd": wd, "netbios": netbios, "cert": cert_info, "rtt": rtt}
+               "mdns_txt": md.get("txt", {}), "ssdp": ss, "wsd": wd, "netbios": netbios, "cert": cert_info, "rtt": rtt,
+               "ipv6": extra.get("ipv6", {}).get(mac, []) if mac else []}
         if not me and not active:
             dev["light"] = True  # détails non sondés : l'interface ne les présente pas comme vérifiés
         dev["http_info"] = " ".join(v for k, v in banners.items() if k in HTTP_PORTS or k in TLS_PORTS)[:300]

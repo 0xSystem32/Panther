@@ -125,6 +125,7 @@ class PanelMixin:
                 self.add_row(tr("Statut"), tr("Nouvel appareil (première apparition)"))
             self.add_row(tr("Adresse IP"), d["ip"], True)
             self.add_row(tr("Adresse MAC"), d["mac"], True)
+            self.add_row(tr("Adresses IPv6"), "\n".join(d.get("ipv6") or []), True)
             self.add_row(tr("Réseau"), d.get("network", "") + (tr("  ·  VLAN {vlan}", vlan=d['vlan']) if d.get("vlan") else ""), True)
             self.add_row(tr("Fabricant"), d["vendor"])
             c = d.get("cert") or {}

@@ -34,7 +34,8 @@ effort **S** (< 1 h) · **M** (quelques heures) · **L** (plus d'une journée).
 - [x] Certificat HTTPS comme indice (sujet, émetteur, noms alternatifs, expiration) : décodeur DER écrit à la main, fabricant de secours sans MAC, règle `cert`, constat « certificat expiré » ; vérifié sur la Livebox (modèle exact lu)
 - [x] Cause trouvée sur le vrai décodeur : il exige un certificat client (mTLS) et coupe la connexion après la 1re réponse, mais sa réponse contient son certificat : lu sans terminer la poignée de main (TLS ≤ 1.2) → « Orange / stbste » → type TV
 - [ ] **P3 · L** Empreinte du système par réponses TCP/IP (TTL, fenêtre, options), au-delà du TTL
-- [ ] **P3 · L** Support IPv6 (découverte NDP, adresses multiples par appareil)
+- [x] IPv6 (partiel) : adresses IPv6 de chaque appareil (table des voisins du noyau + un ping multicast), affichées et exportées. Reste ouvert : découverte des appareils uniquement IPv6, plages IPv6
+- [ ] **P3 · L** Découverte et scan en IPv6 (appareils sans IPv4)
 
 ## 3. Fonctions
 - [x] Étiquettes, notes et groupes par appareil (« enfants », « domotique »), filtres associés

@@ -18,7 +18,7 @@ COLUMNS = [("ip", N_("Adresse IP")), ("name", N_("Nom")), ("type", N_("Type")), 
            ("os", N_("Système")), ("network", N_("Réseau")), ("vlan", N_("VLAN")), ("status", N_("Statut")), ("trusted", N_("De confiance")), ("group", N_("Groupe")),
            ("tags", N_("Étiquettes")), ("note", N_("Notes")), ("first_seen", N_("Première apparition")), ("last_seen", N_("Dernière apparition")),
            ("exposure", N_("Exposition max.")), ("findings", N_("Constats de sécurité")), ("ports", N_("Ports ouverts")), ("services", N_("Services")),
-           ("cert", N_("Certificat HTTPS")), ("switch", N_("Switch")), ("switch_port", N_("Port du switch")), ("confidence", N_("Confiance de la détection (%)")),
+           ("ipv6", N_("Adresses IPv6")), ("cert", N_("Certificat HTTPS")), ("switch", N_("Switch")), ("switch_port", N_("Port du switch")), ("confidence", N_("Confiance de la détection (%)")),
            ("reasons", N_("Indices de détection"))]
 _FORMULA = ("=", "+", "-", "@", "\t", "\r")
 
@@ -40,6 +40,7 @@ def row(d):
             "exposure": security.LABELS.get(security.worst(findings), "") if findings else ("" if findings is None else tr("aucun")),
             "findings": " ; ".join(f["title"] for f in findings or []), "ports": " ".join(map(str, d.get("ports", []))),
             "services": ", ".join(d.get("services", [])),
+            "ipv6": " ".join(d.get("ipv6") or []),
             "cert": " · ".join(x for x in (cert.get("cn") or cert.get("o"), (tr("auto-signé") if cert.get("self_signed") else cert.get("issuer")),
                                            (tr("expiré") if cert.get("expired") else tr("expire le {date}", date=cert['not_after']) if cert.get("not_after") else "")) if x),
             "switch": d.get("switch", ""), "switch_port": d.get("switch_port", ""), "confidence": d.get("confidence", ""),

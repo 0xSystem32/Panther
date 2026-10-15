@@ -30,6 +30,7 @@ only the graphical interface uses PyQt6. The interface is available in **English
 - **Several networks and VLANs**: ranges typed by hand or detected (routes, 802.1Q interfaces, gateways), traceroute path,
   warning when a network does not answer, read-only **SNMP** (MAC addresses and switch ports of other VLANs), **LLDP/CDP**
   neighbours.
+- **IPv6 (addresses)**: the IPv6 addresses of each device (read from the kernel neighbour table after one multicast ping) are shown in the panel and exported; discovery itself is still IPv4.
 - **Scan profiles**: save ranges, depth, interface, SNMP hosts and options under a name (Scan → Scan profiles); a profile never stores a secret and never grants the security-analysis consent.
 - **Monitoring**: **ARP** discovery (normal scan ≈ 10 s), **presence** scan (≈ 2 s, almost no traffic) that reuses the details
   of the last full scan, stoppable scans, quick / normal / thorough depth, automatic scan (presence + one full scan per

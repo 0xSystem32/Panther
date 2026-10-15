@@ -143,6 +143,8 @@ EN = {
         "Max. exposure",
     "Services":
         "Services",
+    "Adresses IPv6":
+        "IPv6 addresses",
     "Certificat HTTPS":
         "HTTPS certificate",
     "Switch":
