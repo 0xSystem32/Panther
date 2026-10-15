@@ -45,5 +45,21 @@ class SuggestTests(unittest.TestCase):
         self.assertEqual(identity.suggest_name(dev(), taken=["Téléphone Samsung", "Téléphone Samsung 2"]), "Téléphone Samsung 3")
 
 
+class AutoNameTests(unittest.TestCase):
+    def test_names_are_applied_stably_and_uniquely(self):
+        a = dev(ip="192.168.1.31", mac="00:1a:2b:00:00:02", hostname="device-1")
+        b = dev(ip="192.168.1.30", mac="00:1a:2b:00:00:01", hostname="")
+        c = dev(ip="192.168.1.32", mac="00:1a:2b:00:00:03", hostname="salon", type="tv")
+        identity.apply_suggested_names([a, b, c])
+        self.assertEqual((b["hostname"], a["hostname"], c["hostname"]), ("Téléphone Samsung", "Téléphone Samsung 2", "salon"))
+        self.assertEqual(a["auto_hostname"], "device-1")
+        self.assertTrue(a["name_suggested"] and "name_suggested" not in c)
+
+    def test_nothing_to_say_leaves_the_device_alone(self):
+        d = dev(type="unknown", vendor="", mac="02:11:22:33:44:55", hostname="")
+        identity.apply_suggested_names([d])
+        self.assertEqual(d["hostname"], "")
+
+
 if __name__ == "__main__":
     unittest.main()

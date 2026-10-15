@@ -6,7 +6,7 @@ from PyQt6.QtCore import QUrl
 from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import QMenu, QMessageBox
 
-from .. import fingerprint, history, identity, rules, store, wol
+from .. import fingerprint, history, rules, store, wol
 from ..i18n import tr
 from ..scanner import reclassify
 from .dialogs import CompareDialog, DataDialog, DuplicatesDialog, EditDialog, MergeDialog, MetaDialog, RuleFromDeviceDialog, RulesDialog, SummaryDialog
@@ -255,7 +255,7 @@ class DevicesMixin:
         names = ", ".join(label(d) for d in new[:3]) + ("…" if len(new) > 3 else "")
         text = (tr("{n} nouvel appareil : {names}", n=len(new), names=names) if len(new) == 1
                 else tr("{n} nouveaux appareils : {names}", n=len(new), names=names))
-        self.new_bar.show_message(text, any(identity.is_anonymous(d) for d in new))
+        self.new_bar.show_message(text, any(not d.get("custom") for d in new))
 
     def see_new_devices(self):
         """Va sur le premier nouvel appareil, sur la carte."""
@@ -266,10 +266,9 @@ class DevicesMixin:
                 return
 
     def name_new_devices(self):
-        """Propose un nom à chaque nouvel appareil anonyme (type + fabricant), un à la fois ; « Annuler » arrête."""
-        for d in [d for d in self.new_devices if identity.is_anonymous(d)]:
-            taken = [x.get("hostname", "") for x in self.devices]
-            dlg = EditDialog(d, self, suggestion=identity.suggest_name(d, taken))
+        """Permet de confirmer ou de changer le nom (déjà proposé d'office : type + fabricant) de chaque nouvel appareil, un à la fois."""
+        for d in [d for d in self.new_devices if not d.get("custom")]:
+            dlg = EditDialog(d, self, suggestion=d["hostname"] if d.get("name_suggested") else "")
             if not dlg.exec():
                 break
             self.commit_override(d, *dlg.values())

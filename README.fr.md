@@ -42,7 +42,7 @@ compare deux scans et exporte des rapports PDF. Le moteur de scan est **écrit �
 - **Alertes** (webhook Discord / Slack / ntfy / JSON, ou e-mail SMTP) : un message groupé par scan pour un nouvel appareil, une
   nouvelle exposition ou un appareil de confiance hors ligne ; l'URL du webhook et le mot de passe SMTP sont rangés dans le
   trousseau du système (ou un fichier privé), jamais dans les réglages.
-- **Au quotidien** : un bandeau quand un scan trouve de nouveaux appareils (*Voir*, ou *Nommer…* avec un nom proposé comme « Téléphone Samsung ») et *Fichier → Résumé de la période* (arrivées, départs, expositions sur 24 h / 7 j / 30 j).
+- **Au quotidien** : un bandeau quand un scan trouve de nouveaux appareils (*Voir*, ou *Nommer…*) ; les appareils sans nom utile sont nommés automatiquement (« Téléphone Samsung »), vos noms l'emportent toujours et *Fichier → Résumé de la période* (arrivées, départs, expositions sur 24 h / 7 j / 30 j).
 - **Rapports** : PDF (résumé, carte, changements, appareils, exposition), Markdown (sécurité), JSON et CSV enrichis (confiance,
   étiquettes, historique), carte en PNG ou SVG ; **rapport PDF planifié** (tous les jours ou toutes les semaines) dans un
   dossier choisi, avec suppression des plus anciens (menu Fichier → « Rapports planifiés… »).

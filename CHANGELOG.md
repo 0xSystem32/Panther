@@ -24,7 +24,7 @@ All notable changes are listed here. Format: [Keep a Changelog](https://keepacha
 - **Quality**: `panther/gui.py` split into the `panther/ui/` package; ruff and mypy clean; fuzz, performance and packaging tests;
   coverage gate in CI; `CONTRIBUTING.md`, pre-commit, issue templates.
 - **Day to day**: a banner under the toolbar when a scan finds new devices (Show / Name… with a suggested name built from the type and
-  vendor, e.g. “Téléphone Samsung”); *File → Period summary* (new, offline, exposures, fixed over 24 h / 7 / 30 days); the “Networks”
+  vendor, e.g. “Téléphone Samsung”) — and devices without a useful name (empty, IP, “device-32”) get such a name automatically, never overriding a name you chose; *File → Period summary* (new, offline, exposures, fixed over 24 h / 7 / 30 days); the “Networks”
   button is now “Ranges to scan” with an explanatory tooltip.
 - **Network lab**: `tools/lab.py` builds a virtual network without root (user + network namespaces: 802.1Q VLANs, a router, hosts with
   real services, a fake SNMP switch, real LLDP/CDP frames); `tests/test_lab.py` scans it end to end (skipped where the kernel forbids it).

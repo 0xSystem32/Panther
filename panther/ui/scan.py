@@ -181,6 +181,7 @@ class ScanMixin:
         """Scan terminé : mémorisation, nouveaux appareils, appareils hors ligne, notification."""
         online, res, offline, note = list(s["devices"]), {"new": [], "baseline": False}, [], ""
         fr = {"new": [], "fixed": [], "baseline": False}
+        identity.apply_suggested_names(online)  # les appareils sans nom utile reçoivent « Type Marque » d'office
         try:
             res = history.record_scan(online, networks=[n["cidr"] for n in s["networks"]], depth=s["depth"])
             history.annotate(online)

@@ -45,7 +45,7 @@ only the graphical interface uses PyQt6. The interface is available in **English
 - **Alerts** (Discord / Slack / ntfy / JSON webhook, or SMTP e-mail): one grouped message per scan for a new device, a new
   exposure or a trusted device going offline; the webhook URL and the SMTP password are stored in the system keyring (or a
   private file), never in the settings.
-- **Day to day**: a banner when a scan finds new devices (*Show*, or *Name…* with a suggested name such as “Téléphone Samsung”) and *File → Period summary* (new, offline, exposures over 24 h / 7 / 30 days).
+- **Day to day**: a banner when a scan finds new devices (*Show*, or *Name…*); devices without a useful name are named automatically (“Téléphone Samsung”), and your own names always win and *File → Period summary* (new, offline, exposures over 24 h / 7 / 30 days).
 - **Reports**: PDF (summary, map, changes, devices, exposure), Markdown (security), enriched JSON and CSV, map as PNG or SVG;
   **scheduled PDF report** (daily or weekly) in a chosen folder, with the oldest ones removed (File → “Scheduled reports…”).
 - **Vendor database**: update from the menu (IEEE), with confirmation.

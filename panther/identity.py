@@ -65,3 +65,17 @@ def suggest_name(d, taken=()):
         n += 1
         name = f"{base} {n}"
     return name[:60]
+
+
+def apply_suggested_names(devices):
+    """Donne tout seul un nom lisible aux appareils anonymes (« Téléphone Samsung »). Le nom d'origine reste dans `auto_hostname`,
+    un nom choisi à la main (`custom`) n'est jamais touché. L'ordre est fixé par l'adresse MAC pour que les « 2 », « 3 » ne changent pas d'un scan à l'autre."""
+    taken = [d.get("hostname", "") for d in devices if not is_anonymous(d)]
+    for d in sorted((d for d in devices if is_anonymous(d)), key=lambda d: (d.get("mac") or "", d.get("ip") or "")):
+        name = suggest_name(d, taken)
+        if name:
+            d.setdefault("auto_hostname", d.get("hostname", ""))
+            d["hostname"] = name
+            d["name_suggested"] = True
+            taken.append(name)
+    return devices

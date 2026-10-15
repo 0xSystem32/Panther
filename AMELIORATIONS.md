@@ -93,7 +93,7 @@ fabricants. `python3 tools/lab.py [--hosts 200] [--snmp]` affiche un scan comple
 - [ ] **P3 · M** Site de documentation (captures, tutoriels, cas d'usage)
 
 ## 8. Idées d'amélioration (à portée de main)
-- [x] Nommer les appareils : le bandeau « nouveaux appareils » propose, pour chaque appareil sans nom utile (vide, IP, « device-37 »), un nom « Type Marque » (ou le modèle) que l'on valide ou modifie ; unique parmi les appareils existants
+- [x] Nommer les appareils : nom automatique « Type Marque » (ou le modèle) pour chaque appareil sans nom utile (vide, IP, « device-37 »), stable d'un scan à l'autre et unique ; le nom d'origine est gardé, un nom choisi à la main gagne toujours, et « Nommer… » du bandeau permet de le changer
 - [x] Bouton « Réseaux » renommé « Plages à scanner (n) » avec une infobulle qui explique ce qui est scanné et ce qui s'ajoute tout seul
 - [x] Résumé de la période (Fichier → Résumé de la période…) : compteurs et détail pour 24 h / 7 j / 30 j (arrivées, départs, retours, expositions, changements d'IP) ; la première analyse n'est pas comptée comme arrivée
 - [x] Bandeau **dans la fenêtre** quand un scan trouve de nouveaux appareils (Voir / Nommer… / fermer), en plus des notifications de bureau et alertes

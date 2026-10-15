@@ -1495,9 +1495,21 @@ class GuiTests(unittest.TestCase):
         self.assertFalse(w.new_bar.isHidden())
         self.assertIn("1 nouvel appareil", w.new_bar.text.text())
         self.assertIn("camera-neuve", w.new_bar.text.text())
-        self.assertFalse(w.new_bar.name_btn.isVisibleTo(w.new_bar), "nom déjà utile : rien à proposer")
         self.scan([*network(), dev("192.168.1.97", "camera-neuve", "camera")])
         self.assertTrue(w.new_bar.isHidden(), "le scan suivant ne trouve plus rien de nouveau")
+
+    def test_anonymous_devices_are_named_automatically(self):
+        w = self.w
+        self.scan(network())
+        self.scan([*network(), dev("192.168.1.98", "device-32", "phone", vendor="Samsung Electronics Co.,Ltd", mac="00:1a:2b:00:00:62"),
+                   dev("192.168.1.99", "salon-pc", "desktop")])
+        names = {d["ip"]: d["hostname"] for d in w.devices}
+        self.assertEqual(names["192.168.1.98"], "Téléphone Samsung")
+        self.assertEqual(names["192.168.1.99"], "salon-pc", "un vrai nom n'est jamais remplacé")
+        self.assertEqual(next(d for d in w.devices if d["ip"] == "192.168.1.98")["auto_hostname"], "device-32")
+        store.set_override(next(d for d in w.devices if d["ip"] == "192.168.1.98"), "Téléphone de Marie", None)
+        self.scan([*network(), dev("192.168.1.98", "device-32", "phone", vendor="Samsung Electronics Co.,Ltd", mac="00:1a:2b:00:00:62")])
+        self.assertEqual(next(d for d in w.devices if d["ip"] == "192.168.1.98")["hostname"], "Téléphone de Marie", "le nom choisi à la main gagne")
 
     def test_banner_names_anonymous_devices_with_a_suggestion(self):
         w = self.w
