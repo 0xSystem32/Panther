@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QProgressBar,
     QPushButton,
@@ -72,13 +73,13 @@ class Main(QMainWindow, ScanMixin, MapMixin, TablesMixin, PanelMixin, DevicesMix
         except (TypeError, ValueError):
             self.last_full_scan = 0.0
         self.saved_pos = {}
-        self.security_on = str(self.settings.value("security", False)).lower() in ("true", "1")
+        self.security_on = str(self.settings.value("security", True)).lower() in ("true", "1")
         self.passive_on = str(self.settings.value("passive", False)).lower() in ("true", "1")
-        self.security_consent = str(self.settings.value("security_consent", False)).lower() in ("true", "1")
+        self.security_consent = str(self.settings.value("security_consent", True)).lower() in ("true", "1")
         self.layout_mode = self.settings.value("layout", "etoile") if self.settings.value("layout", "etoile") in ("etoile", "hierarchique", "types") else "etoile"
         self.show_offline = str(self.settings.value("show_offline", True)).lower() in ("true", "1")
         self.animations = str(self.settings.value("animations", True)).lower() in ("true", "1")
-        mode = str(self.settings.value("theme", "auto"))
+        mode = str(self.settings.value("theme", "dark"))
         self.theme_mode = mode if mode in THEME_MODES else "auto"
         size = str(self.settings.value("text_size", "normal"))
         self.text_size = size if size in {k for k, _l, _s in TEXT_SIZES} else "normal"
@@ -214,6 +215,7 @@ class Main(QMainWindow, ScanMixin, MapMixin, TablesMixin, PanelMixin, DevicesMix
         self.act_stop = QAction(tr("Arrêter le scan"), self, triggered=self.stop_scan); self.act_stop.setShortcut("Ctrl+.")
         self.act_stop.setEnabled(False)
         m.addAction(self.act_scan); m.addAction(self.act_stop); m.addSeparator()
+        self.scan_menu = m
         m.addAction(QAction(tr("Faire confiance à tous les appareils en ligne…"), self, triggered=self.trust_all))
         m.addAction(QAction(tr("Fusionner des doublons…"), self, triggered=self.show_duplicates))
         m.addAction(QAction(tr("Alertes (webhook, e-mail)…"), self, triggered=lambda: AlertsDialog(self).exec()))
@@ -271,6 +273,17 @@ class Main(QMainWindow, ScanMixin, MapMixin, TablesMixin, PanelMixin, DevicesMix
         self.act_security = QAction(tr("Analyse de sécurité (lecture seule)"), self, checkable=True, checked=self.security_on)
         self.act_security.triggered.connect(self.toggle_security)
         m.addAction(self.act_security)
+        # réglages du scan aussi dans le menu Scan : profondeur, écoute seule, analyse de sécurité (mêmes actions que le menu Sécurité)
+        sm = self.scan_menu
+        depth_menu = QMenu(tr("Profondeur"), self); dgroup = QActionGroup(self); self.depth_actions = {}
+        for key, label in (("presence", tr("Présence")), ("rapide", tr("Rapide")), ("normal", tr("Normal")), ("approfondi", tr("Approfondi"))):
+            a = QAction(label, self, checkable=True); dgroup.addAction(a); depth_menu.addAction(a)
+            a.triggered.connect(lambda _c, k=key: self.depth.setCurrentIndex(max(self.depth.findData(k), 0))); self.depth_actions[key] = a
+        sm.insertMenu(self.profile_menu.menuAction(), depth_menu)
+        sm.insertAction(self.profile_menu.menuAction(), self.act_passive)
+        sm.insertAction(self.profile_menu.menuAction(), self.act_security)
+        sm.insertSeparator(self.profile_menu.menuAction())
+        self.depth_menu = depth_menu
         m.addAction(QAction(tr("Voir le rapport de sécurité"), self, triggered=lambda: self.tabs.setCurrentIndex(3)))
         m.addAction(QAction(tr("Exporter le rapport (Markdown)…"), self, triggered=self.export_security))
         m.addSeparator()
@@ -279,7 +292,6 @@ class Main(QMainWindow, ScanMixin, MapMixin, TablesMixin, PanelMixin, DevicesMix
         m.addAction(QAction(tr("Règles personnalisées…"), self, triggered=self.open_rules))
         m.addAction(QAction(tr("Créer une règle pour l'appareil sélectionné…"), self, triggered=lambda: self.create_rule(self.current_device())))
         m = mb.addMenu(tr("Aide"))
-        m.addAction(QAction(tr("Assistant de premier lancement…"), self, triggered=self.open_welcome))
         m.addAction(QAction(tr("Mettre à jour la base des fabricants…"), self, triggered=self.update_oui))
         m.addAction(QAction(tr("Ouvrir le journal d'erreurs"), self, triggered=self.open_log))
         m.addAction(QAction(tr("À propos de Panther"), self, triggered=lambda: QMessageBox.about(
@@ -298,9 +310,10 @@ class Main(QMainWindow, ScanMixin, MapMixin, TablesMixin, PanelMixin, DevicesMix
         self.depth.setToolTip(tr("Présence : qui est là ? (réutilise les détails du dernier scan complet, très discret).\nRapide : "
                                  "ports courants.\nNormal : bon équilibre.\nApprofondi : plus de ports et des délais plus longs.\nLes "
                                  "scans automatiques utilisent la présence, avec un scan complet au plus toutes les heures."))
-        self.depth.setCurrentIndex(max(self.depth.findData(self.settings.value("depth", "normal")), 0))
-        self.depth.currentIndexChanged.connect(lambda _i: self.settings.setValue("depth", self.depth.currentData()))
+        self.depth.setCurrentIndex(max(self.depth.findData(self.settings.value("depth", "approfondi")), 0))
+        self.depth.currentIndexChanged.connect(lambda _i: (self.settings.setValue("depth", self.depth.currentData()), self.sync_depth_menu()))
         self.depth.setEnabled(not self.passive_on)
+        self.sync_depth_menu(); self.depth_menu.setEnabled(not self.passive_on)
         tb.addWidget(self.depth)
         lab2 = QLabel(tr("  Interface")); lab2.setObjectName("muted"); tb.addWidget(lab2)
         self.iface_combo = RefreshCombo()

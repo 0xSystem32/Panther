@@ -51,8 +51,7 @@ compare deux scans et exporte des rapports PDF. Le moteur de scan est **écrit �
 - **Accessibilité** : thème qui suit le système (ou sombre, clair, **contraste élevé** ; les tests vérifient les rapports de
   contraste WCAG de chaque thème), **taille du texte** réglable, focus clavier visible, carte parcourable aux flèches (Entrée
   modifie, Échap désélectionne, `+`/`−` zoom) et onglet *Appareils* qui liste les mêmes appareils sous forme de tableau pour
-  les lecteurs d'écran. Un **assistant de premier lancement** (langue, usage responsable, apparence, options de scan) se
-  rouvre depuis *Aide*.
+  les lecteurs d'écran. La fenêtre du premier lancement ne demande que la langue ; la profondeur du scan (approfondi par défaut), l'écoute seule et l'analyse de sécurité (activée par défaut) sont dans le menu *Scan*.
 - **Interfaces** : fenêtre Qt (français ou anglais), interface web locale, ligne de commande.
 
 ## Captures

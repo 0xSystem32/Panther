@@ -9,7 +9,6 @@ from ..scanner import local_network
 from .settings_dialogs import NetworksDialog, OuiWorker
 from .theme import THEME_MODES, THEMES, T, make_style, resolve_theme, set_text_scale, text_scale_of
 from .util import log, snmp_secret, snmp_v3_secret
-from .wizard import WelcomeWizard, apply_welcome_settings
 
 
 class PrefsMixin:
@@ -38,28 +37,6 @@ class PrefsMixin:
     def on_oui_failed(self, message):
         self.status.setText(tr("Mise à jour de la base des fabricants impossible"))
         QMessageBox.warning(self, tr("Base des fabricants"), tr("La base n'a pas été modifiée.\n\n{message}", message=message))
-
-    def open_welcome(self):
-        """Rouvre l'assistant : les choix s'appliquent tout de suite (sauf la langue, au prochain démarrage)."""
-        old_lang = i18n.language()
-        wiz = WelcomeWizard(parent=self)
-        accepted = wiz.exec()
-        v = wiz.values()
-        i18n.set_language(old_lang)  # l'assistant a pu changer la langue le temps de son affichage : on la rétablit
-        if not accepted:
-            return
-        apply_welcome_settings(self.settings, v)
-        self.set_theme_mode(v["theme"], save=False); self.set_text_size(v["text_size"], save=False)
-        self.depth.setCurrentIndex(max(self.depth.findData(v["depth"]), 0))
-        self.act_passive.setChecked(v["passive"]); self.toggle_passive(v["passive"])
-        self.security_on = v["security"] and not v["passive"]
-        self.act_security.setChecked(self.security_on)
-        self.security_consent = self.security_consent or self.security_on
-        self.refresh_security()
-        self.auto_actions[v["auto_minutes"]].setChecked(True); self.set_auto(v["auto_minutes"])
-        if v["language"] != old_lang:
-            QMessageBox.information(self, tr("Langue"), tr("La langue sera appliquée au prochain démarrage de Panther."))
-        self.status.setText(tr("Réglages enregistrés"))
 
     def choose_language(self, code):
         """Mémorise la langue ; elle s'applique au prochain démarrage (tous les textes sont construits au lancement)."""

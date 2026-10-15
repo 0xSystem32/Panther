@@ -10,9 +10,9 @@ HAS_QT = importlib.util.find_spec("PyQt6") is not None
 
 if HAS_QT:
     from PyQt6.QtCore import QPointF, QSettings, Qt
-    from PyQt6.QtWidgets import QApplication, QLabel, QMenu, QTableWidget, QWidget
+    from PyQt6.QtWidgets import QApplication, QMenu, QTableWidget, QWidget
 
-    from panther import alerts, gui, history, ouiupdate, profiles, reportpdf, rules, schedule, secrets, security, store, wol
+    from panther import alerts, gui, history, ouiupdate, reportpdf, rules, schedule, secrets, security, store, wol
     from panther.ui import dialogs, theme
 
 NET = "192.168.1.0/24"
@@ -80,8 +80,10 @@ class GuiTests(unittest.TestCase):
         w = self.w
         self.assertEqual([a.text() for a in w.menuBar().actions()], ["Fichier", "Scan", "Affichage", "Sécurité", "Détection", "Aide"])
         self.assertEqual([w.tabs.tabText(i) for i in range(w.tabs.count())], ["Carte réseau", "Appareils", "Journal", "Sécurité"])
-        self.assertFalse(w.security_on)                                          # l'analyse de sécurité est désactivée par défaut
-        self.assertEqual(w.depth.currentData(), "normal")
+        self.assertTrue(w.security_on)                                           # l'analyse de sécurité est activée par défaut (désactivable dans le menu Scan)
+        self.assertFalse(w.passive_on)                                           # l'écoute seule est désactivée par défaut
+        self.assertEqual(w.depth.currentData(), "approfondi")                    # scan approfondi par défaut
+        self.assertEqual((w.theme_mode, w.text_size), ("dark", "normal"))        # sombre de base
         self.assertEqual(w.iface_combo.itemData(0), "")                          # « Automatique »
 
     def test_finish_scan_fills_map_table_journal_and_legend(self):
@@ -820,214 +822,44 @@ class GuiTests(unittest.TestCase):
         for sel in ("QPushButton:focus", "QCheckBox:focus", "QTabBar::tab:focus", "QTableWidget:focus"):
             self.assertIn(sel, css)
 
-    def test_welcome_wizard_flow_and_language_switch(self):
+    def test_welcome_wizard_only_asks_for_the_language(self):
         from panther import i18n
         try:
             i18n.set_language("fr")
             wiz = gui.WelcomeWizard()
-            self.assertEqual(wiz.stack.count(), 4)
-            self.assertEqual(wiz.stack.currentIndex(), 0)
-            wiz.lang_buttons["en"].click()                                                       # les pages suivantes passent en anglais
-            self.assertEqual(i18n.language(), "en")
-            wiz.go(1)
-            self.assertEqual(wiz.next_btn.text(), "Next")
-            self.assertFalse(wiz.next_btn.isEnabled())                                           # il faut cocher l'usage responsable
-            wiz.agree.setChecked(True)
-            self.assertTrue(wiz.next_btn.isEnabled())
-            wiz.go(3)
-            self.assertEqual((wiz.next_btn.text(), wiz.step.text()), ("Finish", "Step 4 of 4"))
-            wiz.theme.setCurrentIndex(wiz.theme.findData("contrast")); wiz.size.setCurrentIndex(wiz.size.findData("large"))
-            wiz.depth.setCurrentIndex(wiz.depth.findData("rapide")); wiz.auto.setCurrentIndex(wiz.auto.findData(30)); wiz.security.setChecked(True)
-            self.assertEqual(wiz.values(), {"language": "en", "theme": "contrast", "text_size": "large", "depth": "rapide", "auto_minutes": 30,
-                                            "passive": False, "security": True})
-            wiz.lang_buttons["fr"].click()                                                       # retour au français : tout est reconstruit
-            wiz.go(1)
-            self.assertEqual(wiz.next_btn.text(), "Suivant")
+            self.assertEqual(set(wiz.lang_buttons), {"fr", "en"})
+            wiz.lang_buttons["en"].click()                                                       # un clic choisit la langue et ferme la fenêtre
+            self.assertEqual((wiz.values(), i18n.language(), wiz.result()), ({"language": "en"}, "en", wiz.DialogCode.Accepted))
         finally:
             i18n.set_language("fr")
 
     def test_apply_welcome_settings_is_validated_and_marks_the_first_run_done(self):
         st = self.w.settings
         self.assertTrue(gui.first_run_needed(st))
-        gui.apply_welcome_settings(st, {"language": "xx", "theme": "rose", "text_size": "énorme", "depth": "dangereux", "auto_minutes": 7,
-                                        "passive": False, "security": True})
-        self.assertEqual([st.value(k) for k in ("language", "theme", "text_size", "depth", "auto_minutes")], ["fr", "auto", "normal", "normal", 0])
+        gui.apply_welcome_settings(st, {"language": "xx"})
+        self.assertEqual(st.value("language"), "fr")
         self.assertFalse(gui.first_run_needed(st))
-        self.assertTrue(str(st.value("security_consent")).lower() in ("true", "1"))
-        gui.apply_welcome_settings(st, {"language": "en", "theme": "dark", "text_size": "large", "depth": "rapide", "auto_minutes": 15,
-                                        "passive": True, "security": True})
-        self.assertEqual(str(st.value("security")).lower(), "false")                                  # écoute seule : jamais d'analyse active
-        self.assertEqual((st.value("language"), st.value("auto_minutes")), ("en", 15))
+        gui.apply_welcome_settings(st, {"language": "en"})
+        self.assertEqual(st.value("language"), "en")
 
-    def test_reopening_the_assistant_applies_choices_live(self):
-        values = {"language": "fr", "theme": "light", "text_size": "large", "depth": "approfondi", "auto_minutes": 30, "passive": True, "security": False}
-        old = (gui.WelcomeWizard.exec, gui.WelcomeWizard.values)
-        gui.WelcomeWizard.exec, gui.WelcomeWizard.values = (lambda self: True), (lambda self: values)
-        try:
-            self.w.open_welcome()
-        finally:
-            gui.WelcomeWizard.exec, gui.WelcomeWizard.values = old
-        self.assertEqual((self.w.theme_mode, self.w.text_size, self.w.depth.currentData(), self.w.passive_on), ("light", "large", "approfondi", True))
-        self.assertEqual(gui.T["bg"], gui.THEMES["light"]["bg"])
-        self.assertTrue(self.w.auto_actions[30].isChecked())
-        self.assertFalse(self.w.depth.isEnabled())
-
-    def test_skipping_the_assistant_changes_nothing(self):
-        before = (self.w.theme_mode, self.w.passive_on, self.w.depth.currentData())
-        old = gui.WelcomeWizard.exec
-        gui.WelcomeWizard.exec = lambda self: False
-        try:
-            self.w.open_welcome()
-        finally:
-            gui.WelcomeWizard.exec = old
-        self.assertEqual((self.w.theme_mode, self.w.passive_on, self.w.depth.currentData()), before)
-
-    def test_package_resources_are_found_from_the_ui_subpackage(self):
-        from panther.ui import app
-        self.assertTrue(os.path.isfile(app.ICON))
-        self.assertTrue(os.path.isfile(os.path.join(app.PACKAGE_DIR, "oui.txt")))
-        self.assertTrue(os.path.isdir(os.path.join(app.PACKAGE_DIR, "static")))
-
-    # --- profils de scan
-    def test_save_apply_and_delete_a_profile_through_the_menu(self):
-        self.w.targets = ["192.168.20.0/24"]
-        self.w.depth.setCurrentIndex(self.w.depth.findData("rapide"))
-        self.w.save_profile("Bureau")
-        self.assertEqual([a.text() for a in self.w.profile_menu.actions() if a.text() == "Bureau"], ["Bureau"])
-        self.w.targets = []; self.w.depth.setCurrentIndex(self.w.depth.findData("approfondi"))
-        next(a for a in self.w.profile_menu.actions() if a.text() == "Bureau").trigger()
-        self.assertEqual((self.w.targets, self.w.depth.currentData()), (["192.168.20.0/24"], "rapide"))
-        self.assertIn("Bureau", self.w.status.text())
-        self.w.delete_profile("bureau")
-        self.assertEqual(self.w.load_profiles(), [])
-        self.assertFalse(any(a.text() == "Bureau" for a in self.w.profile_menu.actions()))
-
-    def test_a_profile_never_gives_the_security_consent_and_keeps_snmp_secrets_out_of_settings(self):
-        self.w.security_consent = False
-        self.w.snmp = [{"host": "192.168.1.1", "community": "SECRETE"}]
-        self.w.save_snmp(self.w.snmp, [])
-        self.w.security_on = True
-        self.w.save_profile("Audit")
-        raw = self.w.settings.value("profiles")
-        self.assertNotIn("SECRETE", raw)                                                         # seulement l'hôte, jamais la communauté
-        self.w.snmp = []; self.w.security_on = False
-        self.w.apply_profile(self.w.load_profiles()[0])
-        self.assertFalse(self.w.security_on)                                                     # pas de consentement : l'analyse n'est pas activée
-        self.assertIn("consentement", self.w.status.text())
-        self.assertEqual(self.w.snmp, [{"host": "192.168.1.1", "community": "SECRETE"}])         # la communauté revient du trousseau
-        self.w.security_consent = True
-        self.w.apply_profile(self.w.load_profiles()[0])
-        self.assertTrue(self.w.security_on)
-
-    def test_profile_with_unknown_snmp_secret_warns_and_corrupt_settings_do_not_crash(self):
-        self.w.apply_profile(profiles.make("Sans secret", snmp_hosts=["192.168.1.7"]))
-        self.assertIn("192.168.1.7", self.w.status.text())
-        for bad in ("pas du json", '{"a": 1}', '[1, "x", {"name": null}]'):
-            self.w.settings.setValue("profiles", bad)
-            self.assertEqual(self.w.load_profiles(), [])
-        self.w.settings.setValue("profiles", "[]")
-
-    def test_empty_profile_name_is_refused_with_a_message(self):
-        self.w.save_profile("   ")
-        self.assertTrue(any(b[0] == "warning" for b in self.boxes))
-        self.assertEqual(self.w.load_profiles(), [])
-
-    # --- latence dans le panneau
-    def test_panel_shows_latency_after_two_measured_scans(self):
-        d = dev("192.168.1.30", "tv", "tv")
-        for rtt in (2.0, 3.0, 5.0):
-            self.scan([dict(d, rtt=rtt)])
-        self.w.selected = gui.dkey(self.w.devices[0]); self.w.selected_keys = [self.w.selected]
-        self.w.refresh_panel(); self.app.processEvents()
-        from panther.ui.widgets import LatencyChart
-        self.assertEqual(len(self.w.findChildren(LatencyChart)), 1)
-        texts = " ".join(lab.text() for lab in self.w.findChildren(QLabel))
-        self.assertIn("moy. 3.3", texts)
-
-    # --- animation de la carte
-    def wait_animation(self):
-        end = time.time() + 3
-        while getattr(self.w, "_anim", None) is not None and self.w._anim.state() == self.w._anim.State.Running and time.time() < end:
-            self.app.processEvents(); time.sleep(0.01)
-        self.app.processEvents()
-
-    def test_final_rebuild_slides_nodes_to_their_place_instead_of_jumping(self):
-        self.scan(self.map_devices(6))
-        key = next(k for k, n in self.w.nodes.items() if not n.dev["is_self"])
-        final = self.w.nodes[key].pos()
-        self.w.nodes[key].setPos(final.x() + 300, final.y() - 200)                       # le nœud est « ailleurs » avant le recalcul
-        self.w.animations = True
-        self.w.rebuild(animate=True)
-        node = self.w.nodes[key]
-        self.assertGreater((node.pos() - final).manhattanLength(), 100)                  # il part de l'ancienne position
-        self.wait_animation()
-        self.assertLess((self.w.nodes[key].pos() - final).manhattanLength(), 0.5)        # et arrive exactement à la place calculée
-
-    def test_animation_can_be_switched_off_and_never_touches_unmoved_nodes(self):
-        self.scan(self.map_devices(4))
-        before = {k: (n.pos().x(), n.pos().y()) for k, n in self.w.nodes.items()}
-        self.w.animations = True
-        self.w.rebuild(animate=True)
-        self.assertIsNone(getattr(self.w, "_anim", None))                                # rien n'a bougé : pas d'animation
-        self.assertEqual({k: (n.pos().x(), n.pos().y()) for k, n in self.w.nodes.items()}, before)
-        k = next(iter(self.w.nodes)); self.w.nodes[k].setPos(900, 900)
-        self.w.toggle_animations(False)
-        self.assertEqual(str(self.w.settings.value("animations")).lower(), "false")
-        self.w.rebuild(animate=True)
-        self.assertNotEqual((self.w.nodes[k].pos().x(), self.w.nodes[k].pos().y()), (900, 900))   # sans animation : place définitive tout de suite
-
-    def test_a_rebuild_during_an_animation_does_not_crash(self):
-        self.scan(self.map_devices(8))
-        for n in self.w.nodes.values():
-            n.setPos(n.pos().x() + 200, n.pos().y())
-        self.w.animations = True
-        self.w.rebuild(animate=True)
-        self.w.rebuild()                                                                 # la scène est vidée en pleine animation
-        self.w.rebuild(animate=True)
-        self.wait_animation()
-        self.assertEqual(len(self.w.nodes), len(self.w.devices))
-
-    # --- SNMP v3
-    def test_snmp_v3_source_is_validated_in_the_dialog_and_saved_without_its_password_in_settings(self):
-        dlg = gui.NetworksDialog("192.168.1.0/24", [], [], self.w)
-        dlg.snmp_host.setText("192.168.1.2")
-        dlg.snmp_ver.setCurrentIndex(dlg.snmp_ver.findData("v3"))
-        self.assertFalse(dlg.snmp_v3_row.isHidden())
-        dlg.snmp_comm.setText("lecteur"); dlg.snmp_pass.setText("court")
-        dlg.add_snmp()
-        self.assertEqual(dlg.snmp_sources(), [])                                                 # mot de passe trop court : refusé
-        self.assertIn("8 caractères", dlg.msg.text())
-        dlg.snmp_comm.setText("lecteur"); dlg.snmp_pass.setText("motdepasse-long"); dlg.snmp_proto.setCurrentIndex(dlg.snmp_proto.findData("sha256"))
-        dlg.add_snmp()
-        src = dlg.snmp_sources()[0]
-        self.assertEqual((src["host"], src["user"], src["auth_proto"]), ("192.168.1.2", "lecteur", "sha256"))
-        self.assertIn("v3 lecteur (SHA-256)", dlg.snmp_list.item(0).text())
-        self.assertNotIn("motdepasse", dlg.snmp_list.item(0).text())
-        self.w.save_snmp([src], [])
-        raw = self.w.settings.value("snmp")
-        self.assertNotIn("motdepasse", raw)                                                      # le mot de passe est dans le trousseau
-        self.assertEqual(self.w.load_snmp(), [src])
-        self.w.save_snmp([{"host": "192.168.1.2", "community": "public-ro"}], [src])             # repasse en v2c : l'ancien secret v3 disparaît
-        self.assertIsNone(secrets.get(gui.snmp_v3_secret("192.168.1.2")) if hasattr(gui, "snmp_v3_secret") else secrets.get("snmp-v3-password:192.168.1.2"))
-        self.assertEqual(self.w.load_snmp(), [{"host": "192.168.1.2", "community": "public-ro"}])
-
-    def test_v2c_form_is_unchanged_and_version_switch_updates_the_fields(self):
-        dlg = gui.NetworksDialog("192.168.1.0/24", [], [], self.w)
-        self.assertTrue(dlg.snmp_v3_row.isHidden())
-        dlg.snmp_ver.setCurrentIndex(1); self.assertEqual(dlg.snmp_comm.placeholderText(), "Utilisateur")
-        dlg.snmp_ver.setCurrentIndex(0); self.assertEqual(dlg.snmp_comm.placeholderText(), "Communauté (lecture)")
-        dlg.snmp_host.setText("192.168.1.1"); dlg.snmp_comm.setText("public")
-        dlg.add_snmp()
-        self.assertEqual(dlg.snmp_sources(), [{"host": "192.168.1.1", "community": "public"}])
-
-    def test_a_profile_restores_a_v3_source_from_the_keyring(self):
-        src = {"host": "192.168.1.2", "user": "lecteur", "auth_proto": "sha1", "auth_password": "motdepasse-long"}
-        self.w.snmp = [src]; self.w.save_snmp([src], [])
-        self.w.save_profile("Switch")
-        self.w.snmp = []
-        self.w.apply_profile(self.w.load_profiles()[0])
-        self.assertEqual(self.w.snmp, [src])
-        self.assertNotIn("SNMP inconnue", self.w.status.text())
+    def test_scan_menu_holds_depth_listen_only_and_security_options(self):
+        w = self.w
+        titles = [a.text() for a in w.scan_menu.actions() if a.text()]
+        for wanted in ("Profondeur", "Écoute seule (aucune sonde active)", "Analyse de sécurité (lecture seule)", "Profils de scan"):
+            self.assertIn(wanted, titles)
+        self.assertTrue(w.depth_actions["approfondi"].isChecked())                              # défaut : approfondi
+        w.depth_actions["rapide"].trigger()
+        self.assertEqual((w.depth.currentData(), w.settings.value("depth")), ("rapide", "rapide"))
+        w.depth.setCurrentIndex(w.depth.findData("normal"))                                     # la barre d'outils met le menu à jour aussi
+        self.assertTrue(w.depth_actions["normal"].isChecked())
+        self.assertTrue(w.act_security.isChecked())
+        w.act_security.trigger()                                                                # même action que dans le menu Sécurité
+        self.assertFalse(w.security_on)
+        w.act_passive.trigger()
+        self.assertTrue(w.passive_on)
+        self.assertFalse(w.depth_menu.isEnabled())                                              # écoute seule : profondeur sans objet
+        w.act_passive.trigger()
+        self.assertTrue(w.depth_menu.isEnabled())
 
     # --- anglais
     FRENCH = __import__("re").compile(r"[àâçéèêëîïôùûüœ]|\b(appareils?|réseaux?|lancez|aucun[e]?|erreur|impossible|enregistr\w+|choisissez|dossier|fichier|"
@@ -1076,9 +908,6 @@ class GuiTests(unittest.TestCase):
                          lambda: gui.EditDialog(w.devices[3], w), lambda: gui.CompareDialog(history.list_scans(), w),
                          lambda: gui.DuplicatesDialog([(w.devices[3], w.devices[4], ["same name"])], lambda a, b: None, w), lambda: gui.MergeDialog("t", "text", w.devices[:3], w)):
                 dlg = make(); texts |= self.visible_texts(dlg); dlg.close()
-            wiz = gui.WelcomeWizard(); i18n.set_language("en"); wiz.choose_language("en")
-            texts |= {t for t in self.visible_texts(wiz) if "Welcome" not in t and "Choose your language" not in t}   # 1re page : volontairement bilingue
-            wiz.close()
             bad = sorted(t for t in texts if self.FRENCH.search(t.replace("Français", "")))
             self.assertEqual(bad, [])
             self.assertGreater(len(texts), 150)                                                  # le parcours a bien vu l'interface

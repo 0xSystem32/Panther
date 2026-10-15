@@ -14,7 +14,7 @@ All notable changes are listed here. Format: [Keep a Changelog](https://keepacha
 - **Privacy**: listen-only mode (nothing is sent), “Erase everything”, SNMP community and alert secrets in the system keyring,
   private data folder (mode 700/600), `SECURITY.md`.
 - **Interface**: English and French (`--lang`, View → Language), `--demo` fictional network, grouped-by-type map layout, mini-map,
-  multi-selection, system/dark/light/high-contrast themes, adjustable text size, keyboard navigation, first-run assistant.
+  multi-selection, system/dark/light/high-contrast themes, adjustable text size, keyboard navigation, a first-launch window that only asks for the language; deep scan and the security analysis are on by default and, like listen-only, set in the Scan menu.
 - **Quality**: `panther/gui.py` split into the `panther/ui/` package; ruff and mypy clean; fuzz, performance and packaging tests;
   coverage gate in CI; `CONTRIBUTING.md`, pre-commit, issue templates.
 - **Packaging**: man page, bash and zsh completions, release workflow (wheel + .deb attached to a GitHub release on `v*` tags).

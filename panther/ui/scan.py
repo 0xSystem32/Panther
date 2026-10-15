@@ -32,6 +32,12 @@ class ScanMixin:
 
     FULL_SCAN_EVERY = 3600  # secondes : au plus un scan complet par heure pendant les scans automatiques
 
+    def sync_depth_menu(self):
+        """Le menu Scan → Profondeur suit la liste déroulante de la barre d'outils (et inversement)."""
+        actions = getattr(self, "depth_actions", None)
+        if actions and self.depth.currentData() in actions:
+            actions[self.depth.currentData()].setChecked(True)
+
     # ---- profils de scan enregistrés (plages, profondeur, interface, hôtes SNMP, options)
     def load_profiles(self):
         import json
@@ -277,6 +283,8 @@ class ScanMixin:
         self.passive_on = on
         self.settings.setValue("passive", on)
         self.depth.setEnabled(not on)
+        if getattr(self, "depth_menu", None) is not None:
+            self.depth_menu.setEnabled(not on)
         self.status.setText(tr("Écoute seule : Panther n'enverra plus rien sur le réseau (il lit la table des voisins du noyau et "
                                "les baux DHCP)") if on
                             else tr("Écoute seule désactivée"))

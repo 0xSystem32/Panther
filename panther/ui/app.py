@@ -44,7 +44,7 @@ def main(demo=False, lang=None):
 
     def look():
         """Apparence enregistrée, appliquée avant d'afficher quoi que ce soit : thème (auto = système) et taille du texte."""
-        mode, size = str(settings.value("theme", "auto")), str(settings.value("text_size", "normal"))
+        mode, size = str(settings.value("theme", "dark")), str(settings.value("text_size", "normal"))
         set_text_scale(text_scale_of(size))
         T.update(THEMES[resolve_theme(mode if mode in THEME_MODES else "auto")])
         app.setStyleSheet(make_style())
@@ -54,7 +54,7 @@ def main(demo=False, lang=None):
         if wiz.exec():
             apply_welcome_settings(settings, wiz.values())
         else:
-            settings.setValue("welcome_done", True)  # « Passer » : valeurs par défaut, et on ne redemande pas
+            settings.setValue("welcome_done", True)  # fenêtre fermée sans choix : langue du système, et on ne redemande pas
             settings.setValue("language", i18n.language())
         look()
     if demo:

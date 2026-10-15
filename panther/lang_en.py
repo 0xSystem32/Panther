@@ -1217,8 +1217,6 @@ EN = {
         "Could not update the vendor database",
     "La base n'a pas été modifiée.\n\n{message}":
         "The database was not modified.\n\n{message}",
-    "Réglages enregistrés":
-        "Settings saved",
     "Mode démonstration : aucun téléchargement n'est effectué.":
         "Demo mode: nothing is downloaded.",
     "Mettre à jour la base des fabricants":
@@ -1605,6 +1603,8 @@ EN = {
         "Listen-only (no active probes)",
     "Analyse de sécurité (lecture seule)":
         "Security analysis (read-only)",
+    "Profondeur":
+        "Depth",
     "Aide":
         "Help",
     "  Profondeur":
@@ -1673,6 +1673,10 @@ EN = {
         "Light",
     "Contraste élevé":
         "High contrast",
+    "Rapide":
+        "Quick",
+    "Approfondi":
+        "Thorough",
     "Voir le rapport de sécurité":
         "View security report",
     "Exporter le rapport (Markdown)…":
@@ -1683,18 +1687,12 @@ EN = {
         "Custom rules…",
     "Créer une règle pour l'appareil sélectionné…":
         "Create a rule for the selected device…",
-    "Assistant de premier lancement…":
-        "First-run assistant…",
     "Mettre à jour la base des fabricants…":
         "Update the vendor database…",
     "Ouvrir le journal d'erreurs":
         "Open the error log",
     "À propos de Panther":
         "About Panther",
-    "Rapide":
-        "Quick",
-    "Approfondi":
-        "Thorough",
     "avertissement":
         "warning",
     "avertissements":
@@ -1703,34 +1701,4 @@ EN = {
         "Security analysis",
     "Panther – scanner et cartographie de réseau local.\n\nMoteur de scan maison (TCP, ARP, NetBIOS, mDNS), sans dépendance externe.\nÀ n'utiliser que sur des réseaux dont vous avez l'autorisation.":
         "Panther – local network scanner and mapper.\n\nIn-house scan engine (TCP, ARP, NetBIOS, mDNS), no external dependency.\nOnly use it on networks you are authorised to scan.",
-    "Je n'utiliserai Panther que sur des réseaux dont j'ai la responsabilité ou l'autorisation.":
-        "I will only use Panther on networks I am responsible for or have permission to scan.",
-    "Écoute seule : ne rien envoyer sur le réseau":
-        "Listen-only: send nothing on the network",
-    "Analyse de sécurité en lecture seule (ports ouverts, services sans mot de passe)":
-        "Read-only security analysis (open ports, services without a password)",
-    "Profondeur":
-        "Depth",
-    "Étape {i} sur {n}":
-        "Step {i} of {n}",
-    "Précédent":
-        "Back",
-    "Passer":
-        "Skip",
-    "Un outil à utiliser avec discernement":
-        "A tool to use responsibly",
-    "Apparence":
-        "Appearance",
-    "Façon de scanner":
-        "How to scan",
-    "Terminer":
-        "Finish",
-    "Suivant":
-        "Next",
-    "Panther envoie des paquets aux appareils d'un réseau pour les reconnaître. Scanner un réseau qui n'est pas le vôtre peut être illégal. Il refuse les plages publiques et n'essaie jamais de mot de passe.":
-        "Panther sends packets to the devices of a network to recognise them. Scanning a network that is not yours may be illegal. It refuses public ranges and never tries a password.",
-    "Le thème et la taille du texte se changent à tout moment dans le menu Affichage.":
-        "The theme and text size can be changed at any time in the View menu.",
-    "Rien n'est lancé tant que vous n'appuyez pas sur « Lancer le scan ».":
-        "Nothing runs until you press “Start scan”.",
 }

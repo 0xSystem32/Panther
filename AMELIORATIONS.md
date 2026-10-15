@@ -63,7 +63,7 @@ effort **S** (< 1 h) · **M** (quelques heures) · **L** (plus d'une journée).
 - [x] Carte : disposition « regroupée par type » (amas ronds, positions mémorisées à part), mini-carte (visible quand on zoome, clic/glisser), sélection multiple (Maj + glisser, Ctrl + clic, tout sélectionner) avec panneau de synthèse, confiance et étiquettes/groupe en masse, centrage sur la sélection (`Ctrl+Maj+0`)
 - [x] Accessibilité : carte aux flèches (Entrée, Échap, +/−, Ctrl+A), focus visible, contrastes WCAG AA vérifiés par test pour les 3 thèmes (AAA pour « contraste élevé »), taille du texte réglable (4 tailles, carte comprise), noms accessibles. Limite : les nœuds de la carte ne sont pas exposés aux lecteurs d'écran (l'onglet Appareils, un tableau, est l'équivalent)
 - [x] Thème automatique (suit le système en direct, Qt ≥ 6.5), sombre, clair, contraste élevé
-- [x] Assistant de premier lancement (langue, usage responsable obligatoire, apparence, profondeur, écoute seule, analyse de sécurité, scan automatique) ; Aide → Assistant pour le rouvrir
+- [x] Premier lancement : une fenêtre qui ne demande que la langue ; thème sombre de base ; scan approfondi, analyse de sécurité activée et écoute seule désactivée par défaut, réglables dans le menu Scan (profondeur, écoute seule, analyse)
 
 ## 6. Qualité du code
 - [x] `gui.py` (3 400 lignes) découpé en package `panther/ui/` : 9 modules + 7 mixins pour la fenêtre principale (le plus grand : 447 lignes) ; `gui.py` réexporte les noms publics. Le découpage a révélé un chemin d'icône cassé, désormais couvert par un test

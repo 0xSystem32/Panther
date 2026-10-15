@@ -53,7 +53,7 @@ only the graphical interface uses PyQt6. The interface is available in **English
 - **Accessibility**: theme that follows the system (or dark, light, **high contrast**; every theme is checked against WCAG
   contrast ratios by the tests), adjustable **text size**, visible keyboard focus, a map you can walk with the arrow keys
   (Enter edits, Esc clears, `+`/`−` zoom), and a *Devices* tab that lists the same devices as a table for screen readers. A
-  **first-run assistant** (language, responsible use, appearance, scanning options) can be reopened from *Help*.
+  first-launch window only asks for the language; scan depth (deep by default), listen-only and the security analysis (on by default) are in the *Scan* menu.
 - **Interfaces**: Qt window (English or French), local web interface, command line.
 
 ## Screenshots
