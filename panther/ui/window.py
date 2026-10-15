@@ -151,6 +151,7 @@ class Main(QMainWindow, ScanMixin, MapMixin, TablesMixin, PanelMixin, DevicesMix
         sep = QFrame(); sep.setObjectName("sep")
         self.form = QFormLayout(); self.form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         self.form.setHorizontalSpacing(16); self.form.setVerticalSpacing(10)
+        self.form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
         self.edit_btn = QPushButton(tr("Modifier le nom / le type…"))
         self.edit_btn.clicked.connect(lambda: self.edit_device(self.current_device()))
         self.trust_btn = QPushButton()

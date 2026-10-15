@@ -3,7 +3,7 @@ import sqlite3
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
-from PyQt6.QtWidgets import QLabel, QMessageBox
+from PyQt6.QtWidgets import QLabel, QMessageBox, QSizePolicy
 
 from .. import fingerprint, history, models, security
 from ..i18n import plural, tr
@@ -11,7 +11,7 @@ from .dialogs import MetaDialog
 from .icons import type_pixmap
 from .theme import sev_color
 from .util import EVENT_LABELS, LABELS, tip, when, when_short
-from .widgets import LatencyChart, PresenceBar
+from .widgets import LatencyChart, PresenceBar, WrappedValue
 
 
 class PanelMixin:
@@ -22,8 +22,12 @@ class PanelMixin:
         if not value:
             return
         k = QLabel(key); k.setObjectName("key")
+        if WrappedValue.needed(value):  # adresse IPv6, MAC, bannière sans espace : un QLabel déborderait du panneau
+            self.form.addRow(k, WrappedValue(str(value), mono))
+            return
         v = QLabel(str(value)); v.setTextFormat(Qt.TextFormat.PlainText); v.setWordWrap(True)
         v.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        v.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)  # le texte passe à la ligne, il n'élargit pas le panneau
         if mono:
             v.setFont(QFont("monospace", 9))
         self.form.addRow(k, v)

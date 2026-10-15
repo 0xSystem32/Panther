@@ -861,6 +861,40 @@ class GuiTests(unittest.TestCase):
         w.act_passive.trigger()
         self.assertTrue(w.depth_menu.isEnabled())
 
+    # --- panneau de détails : rien ne doit déborder quand la fenêtre est étroite
+    def test_side_panel_never_overflows_with_long_unbroken_values(self):
+        from PyQt6.QtWidgets import QScrollArea
+
+        from panther.ui.widgets import PresenceBar, WrappedValue
+        d = dev("192.168.1.30", "tv-salon", "tv", [80, 443, 8009, 554, 9100, 631, 5000, 5001, 22, 445, 3389])
+        d.update(ipv6=["2001:db8:0:1:5054:ff:fe12:3456", "fe80::5054:ff:fe12:3456"], banners={"80": "X" * 90},
+                 cert={"cn": "AABBCC-stbste-12345678-" + "z" * 40, "o": "Orange", "issuer": "Orange", "not_after": "2034-04-01"}, rtt=3.2)
+        for i in range(50):                                                                  # 50 scans : la barre de présence ne doit pas imposer 500 px
+            self.scan([dict(d, rtt=2.0 + i % 5)])
+        self.w.resize(1000, 700); self.app.processEvents()
+        self.w.selected = gui.dkey(self.w.devices[0]); self.w.selected_keys = [self.w.selected]
+        self.w.refresh_panel(); self.app.processEvents()
+        area = self.w.side.findChild(QScrollArea)
+        body = area.widget()
+        self.assertLessEqual(body.minimumSizeHint().width(), self.w.side.width())            # rien n'impose une largeur supérieure au panneau
+        self.assertFalse(area.horizontalScrollBar().isVisible())
+        self.assertTrue(self.w.side.findChildren(WrappedValue))                              # les valeurs sans espace se coupent n'importe où
+        bar = self.w.side.findChildren(PresenceBar)[0]
+        self.assertLess(bar.minimumWidth(), 100)
+        for wv in self.w.side.findChildren(WrappedValue):
+            self.assertLessEqual(wv.width(), self.w.side.width())
+        texts = [wv.toPlainText() for wv in self.w.side.findChildren(WrappedValue)]
+        self.assertIn("2001:db8:0:1:5054:ff:fe12:3456\nfe80::5054:ff:fe12:3456", texts)   # le texte copié n'est pas modifié
+
+    def test_wrapped_value_grows_in_height_when_the_panel_gets_narrower(self):
+        from panther.ui.widgets import WrappedValue
+        v = WrappedValue("a" * 120, mono=True)
+        v.resize(300, 20); v.show(); self.app.processEvents()
+        wide = v.height()
+        v.resize(120, 20); self.app.processEvents()
+        self.assertGreater(v.height(), wide)
+        self.assertFalse(WrappedValue.needed("192.168.1.1 · gateway 192.168.1.254")); self.assertTrue(WrappedValue.needed("x" * 30))
+
     # --- anglais
     FRENCH = __import__("re").compile(r"[àâçéèêëîïôùûüœ]|\b(appareils?|réseaux?|lancez|aucun[e]?|erreur|impossible|enregistr\w+|choisissez|dossier|fichier|"
                                       r"sélectionn\w+|nouveau|nouvel|hors ligne|en ligne|avec|dans|pour|une?|des|les|est|pas|sur)\b", __import__("re").I)
