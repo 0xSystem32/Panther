@@ -1,0 +1,71 @@
+.TH PANTHER 1 "2026" "Panther" "User Commands"
+.SH NAME
+panther \- local network scanner and mapper
+.SH SYNOPSIS
+.B panther
+[\fB\-\-lang\fR \fIfr\fR|\fIen\fR] [\fB\-\-demo\fR] [\fB\-\-verbose\fR]
+.br
+.B panther \-\-cli
+[\fB\-\-depth\fR \fIecoute\fR|\fIrapide\fR|\fInormal\fR|\fIapprofondi\fR] [\fB\-\-target\fR \fICIDR\fR]... [\fB\-\-iface\fR \fIIFACE\fR] [\fB\-\-security\fR]
+.br
+.B panther \-\-web
+[\fB\-\-port\fR \fIPORT\fR]
+.SH DESCRIPTION
+.B Panther
+discovers the devices of a local network (phones, printers, TVs, cameras, NAS, switches\&...), draws the map, tracks their presence
+over time, handles several networks and VLANs, compares two scans and exports reports.
+The scan engine is written in standard-library Python; only the graphical interface needs PyQt6.
+.PP
+Only use it on networks you are responsible for or have written permission to scan.
+.SH OPTIONS
+.TP
+.B \-\-cli
+Scan and print a table in the terminal, without any interface.
+.TP
+.B \-\-web
+Serve a local web interface (127.0.0.1 only) instead of opening the window.
+.TP
+.BI \-\-target " CIDR"
+Extra range to scan (VLAN, routed subnet). May be repeated. Public ranges are refused.
+.TP
+.BI \-\-depth " LEVEL"
+Scan depth for \fB\-\-cli\fR: \fIecoute\fR (listen only: nothing is sent on the network), \fIrapide\fR, \fInormal\fR (default) or \fIapprofondi\fR.
+.TP
+.BI \-\-iface " IFACE"
+Network interface to scan (default: the interface of the default route).
+.TP
+.B \-\-security
+Enable the read-only security analysis (open ports, banners, services reachable without a password). It never tries a credential.
+.TP
+.B \-\-demo
+Try the interface on a fictional network: nothing is scanned, no configuration is read or written.
+.TP
+.BI \-\-lang " LANG"
+Interface language, \fIfr\fR or \fIen\fR. Default: the saved choice, then the system's.
+.TP
+.BI \-\-port " PORT"
+Port of the web interface (default 8765).
+.TP
+.B \-\-verbose
+Detailed log, also printed on the console.
+.TP
+.B \-\-version
+Print the version and exit.
+.SH FILES
+.TP
+.I ~/.config/Panther/panther.db
+History (devices, scans, events), readable by the owner only.
+.TP
+.I ~/.config/Panther/devices.json
+Names and types set by hand.
+.TP
+.I ~/.config/Panther/rules.json
+Custom detection rules (see /usr/share/doc/panther-netscan/RULES.md).
+.TP
+.I ~/.config/Panther/panther.log
+Error log (device addresses and names, never a password).
+.SH SEE ALSO
+.BR lldpd (8),
+.BR ip (8)
+.SH AUTHOR
+0xSystem32. Licence: MIT.

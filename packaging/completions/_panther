@@ -1,0 +1,14 @@
+#compdef panther
+_arguments \
+  '(-h --help)'{-h,--help}'[show help]' \
+  '--version[show the version]' \
+  '--cli[scan and print a table]' \
+  '--web[local web interface]' \
+  '*--target=[extra range (CIDR)]:cidr:' \
+  '--depth=[scan depth]:depth:(ecoute rapide normal approfondi)' \
+  '--iface=[network interface]:interface:_net_interfaces' \
+  '--security[read-only security analysis]' \
+  '--demo[fictional network, nothing scanned]' \
+  '--lang=[interface language]:language:(fr en)' \
+  '--verbose[detailed log]' \
+  '--port=[web interface port]:port:'

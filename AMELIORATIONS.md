@@ -73,11 +73,11 @@ effort **S** (< 1 h) · **M** (quelques heures) · **L** (plus d'une journée).
 - [x] `pre-commit`, `CONTRIBUTING.md`, modèles de tickets
 
 ## 7. Distribution
-- [ ] **P1 · S** `CHANGELOG.md` et publication automatique d'une version GitHub (wheel + `.deb`) à chaque étiquette
+- [x] `CHANGELOG.md` et workflow `release.yml` : une étiquette `vX.Y.Z` (égale à `__version__`) publie une version GitHub avec wheel + `.deb` et les notes du CHANGELOG (à essayer : jamais exécuté)
 - [ ] **P2 · L** AppImage (Python + Qt embarqués, utilisable sans installation)
 - [ ] **P2 · M** Publication sur PyPI (`pipx install panther-netscan`) une fois le nom réservé
 - [ ] **P3 · L** Flatpak ou Snap
-- [ ] **P3 · S** Page de manuel (`man panther`) et complétion du shell
+- [x] Page de manuel `panther(1)`, complétions bash et zsh, installées par le `.deb` ; un test vérifie qu'elles listent toutes les options réelles
 - [ ] **P3 · L** Support de macOS et Windows (aujourd'hui Linux seulement : `ip`, `/proc/net/arp`, `/sys`)
 - [ ] **P3 · M** Site de documentation (captures, tutoriels, cas d'usage)
 

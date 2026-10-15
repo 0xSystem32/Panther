@@ -20,8 +20,7 @@ def _lang_from(argv):
     return None
 
 
-def parse_args(argv=None):
-    i18n.set_language(_lang_from(argv) or i18n.detect())
+def build_parser():
     ap = argparse.ArgumentParser(prog="panther", description=tr("Scanner et carte de réseau local"))
     ap.add_argument("--version", action="version", version=f"Panther {__version__}")
     ap.add_argument("--cli", action="store_true", help=tr("scanner et afficher un tableau (sans interface)"))
@@ -38,7 +37,12 @@ def parse_args(argv=None):
     ap.add_argument("--lang", choices=tuple(i18n.LANGUAGES), help=tr("langue de l'interface (défaut : celle du système)"))
     ap.add_argument("--verbose", action="store_true", help=tr("journal détaillé (aussi affiché sur la console)"))
     ap.add_argument("--port", type=int, default=8765, help=tr("port de l'interface web"))
-    return ap.parse_args(argv)
+    return ap
+
+
+def parse_args(argv=None):
+    i18n.set_language(_lang_from(argv) or i18n.detect())
+    return build_parser().parse_args(argv)
 
 
 def run_cli(a):
