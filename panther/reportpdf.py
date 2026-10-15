@@ -3,8 +3,7 @@
 import html
 import time
 
-from . import compare
-from . import security
+from . import compare, security
 from .i18n import tr
 from .labels import TYPE_LABELS
 
@@ -46,7 +45,7 @@ def build_html(devices, networks=(), when=None, image_name=None, security_on=Fal
            f'<p style="color:#6b7280;">Panther · {esc(time.strftime(tr("%d/%m/%Y à %H:%M"), when))}'
            + (esc(tr(" · réseaux : {networks}", networks=", ".join(networks))) if networks else "") + "</p>",
            f"<h2>{esc(tr('Résumé'))}</h2>"]
-    kinds = {}
+    kinds: dict = {}
     for d in online:
         kinds[d.get("type", "unknown")] = kinds.get(d.get("type", "unknown"), 0) + 1
     out.append("<p>" + tr("<b>{online}</b> appareil(s) en ligne · <b>{offline}</b> hors ligne · <b>{trusted}</b> de confiance · "
@@ -107,7 +106,9 @@ def write_pdf(path, html_text, image=None, image_name="map"):
     doc.setDefaultFont(QFont("sans-serif", 9))
     if image is not None:
         doc.addResource(QTextDocument.ResourceType.ImageResource, QUrl(image_name), image)
-    doc.documentLayout().setPaintDevice(w)
+    layout = doc.documentLayout()
+    if layout is not None:
+        layout.setPaintDevice(w)
     doc.setPageSize(QSizeF(w.width(), w.height()))
     doc.setHtml(html_text)
     doc.print(w)

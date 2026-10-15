@@ -84,7 +84,8 @@ class DetectionTests(unittest.TestCase):
 
 class InterfaceTests(unittest.TestCase):
     def kind(self, name, wireless=False, hwtype=None, phy=False):
-        import os, tempfile
+        import os
+        import tempfile
         with tempfile.TemporaryDirectory() as d:
             os.makedirs(os.path.join(d, name))
             if wireless:

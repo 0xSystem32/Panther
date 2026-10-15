@@ -23,6 +23,7 @@ import logging
 import os
 import re
 import tempfile
+from typing import Any
 
 from . import fingerprint
 from .i18n import tr
@@ -174,7 +175,7 @@ def parse(data):
     return rs
 
 
-_cache = {"path": None, "mtime": None, "rs": RuleSet()}
+_cache: dict[str, Any] = {"path": None, "mtime": None, "rs": RuleSet()}
 
 
 def read_data(path=None):
@@ -234,7 +235,7 @@ def evaluate(dev, rs=None):
         try:
             if r.matches(view):
                 out.append((r.kind, r.points, r.reason, r.force))
-        except Exception:  # noqa: BLE001 - une règle défaillante ne doit jamais faire échouer la détection
+        except Exception:
             log.debug("Règle %s ignorée sur %s", r.name, dev.get("ip"), exc_info=True)
     return out
 

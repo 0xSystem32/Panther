@@ -6,7 +6,6 @@ from PyQt6.QtWidgets import QApplication
 from .. import security
 from ..i18n import N_
 
-
 THEMES = {
     "dark": dict(bg="#1b1c1f", surface="#222428", panel="#26282d", border="#383b42",
                  fg="#d9dce1", mut="#9397a1", acc="#5895ff", acc_bg="#243652", on_acc="#0b1020",

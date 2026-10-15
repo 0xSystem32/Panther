@@ -8,8 +8,8 @@ from PyQt6.QtWidgets import QFileDialog, QMessageBox, QTableWidgetItem
 
 from .. import history, security
 from ..i18n import tr
-from .theme import T, sev_color
 from .icons import type_pixmap
+from .theme import T, sev_color
 from .util import EVENT_LABELS, KEY_ROLE, LABELS, SECURITY_INFO, dkey, ip_key, log, status_text, tip, when
 from .widgets import SortItem
 

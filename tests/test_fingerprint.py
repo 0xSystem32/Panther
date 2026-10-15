@@ -1,8 +1,7 @@
 import struct
 import unittest
 
-from panther import discovery
-from panther import fingerprint
+from panther import discovery, fingerprint
 
 
 def dev(**kw):
@@ -128,7 +127,8 @@ class VendorTests(unittest.TestCase):
         self.assertEqual(s(""), "")
 
     def test_conversion_from_ieee_csv(self):
-        import importlib.util, os
+        import importlib.util
+        import os
         spec = importlib.util.spec_from_file_location("upd", os.path.join(os.path.dirname(__file__), "..", "tools", "update_oui.py"))
         upd = importlib.util.module_from_spec(spec); spec.loader.exec_module(upd)
         text = ("Registry,Assignment,Organization Name,Organization Address\n"

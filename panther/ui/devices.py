@@ -9,8 +9,8 @@ from PyQt6.QtWidgets import QMenu, QMessageBox
 from .. import fingerprint, history, rules, store, wol
 from ..i18n import tr
 from ..scanner import reclassify
-from .util import dkey
 from .dialogs import CompareDialog, DataDialog, DuplicatesDialog, EditDialog, MergeDialog, MetaDialog, RuleFromDeviceDialog, RulesDialog
+from .util import dkey
 
 
 class DevicesMixin:

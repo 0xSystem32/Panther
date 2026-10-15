@@ -28,7 +28,7 @@ class FakeAgent(threading.Thread):
         while not self.stop:
             try:
                 pkt, addr = self.sock.recvfrom(65535)
-            except socket.timeout:
+            except TimeoutError:
                 continue
             tag, body, _ = snmp.parse_tlv(pkt, 0)
             _, _, off = snmp.parse_tlv(body, 0)

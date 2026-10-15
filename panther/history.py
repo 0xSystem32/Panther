@@ -10,10 +10,7 @@ import os
 import sqlite3
 import time
 
-from . import compare
-from . import privacy
-from . import security
-from . import store
+from . import compare, privacy, security, store
 from .i18n import tr
 
 PATH = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"), "Panther", "panther.db")
@@ -128,7 +125,9 @@ def record_scan(devices, now=None, networks=None, depth="normal"):
         baseline = con.execute("SELECT COUNT(*) FROM devices").fetchone()[0] == 0
         scan_id = con.execute("INSERT INTO scans(ts, depth, networks) VALUES(?,?,?)",
                               (now, depth, ",".join(networks or []))).lastrowid
-        new, seen_keys, n_events, recs, evs = [], set(), 0, [], []
+        new: list = []
+        seen_keys: set = set()
+        n_events, recs, evs = 0, [], []
         for d in devices:
             if not d.get("online", True):
                 continue

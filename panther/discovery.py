@@ -10,8 +10,8 @@ import socket
 import struct
 import time
 import urllib.parse
-import uuid
 import urllib.request
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 
 log = logging.getLogger("panther.discovery")
@@ -53,7 +53,7 @@ def _fetch_description(ip, location):
             return {}
         with urllib.request.urlopen(location, timeout=2) as r:
             text = r.read(65536).decode("utf-8", "ignore")
-    except Exception:  # noqa: BLE001
+    except Exception:
         return {}
     return {"friendly": _xml_field(text, "friendlyName"),
             "manufacturer": _xml_field(text, "manufacturer"),
@@ -70,7 +70,8 @@ def ssdp_scan(timeout=3.0, iface_ip=None):
     s.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 2)
     if iface_ip:
         s.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, socket.inet_aton(iface_ip))
-    found, locations = {}, {}
+    found: dict = {}
+    locations: dict = {}
     try:
         for _ in range(2):
             s.sendto(msg, SSDP_ADDR)
@@ -78,7 +79,7 @@ def ssdp_scan(timeout=3.0, iface_ip=None):
         while time.time() < end:
             try:
                 data, (ip, _) = s.recvfrom(65535)
-            except socket.timeout:
+            except TimeoutError:
                 continue
             h = _parse_ssdp(data)
             d = found.setdefault(ip, {"server": "", "st": []})
@@ -164,7 +165,7 @@ def _split_service(name):
 
 def collect_mdns(packets):
     """Agrège les réponses [(ip, bytes)] -> {ip: {services, names, txt, host}}."""
-    info = {}
+    info: dict = {}
     for ip, data in packets:
         d = info.setdefault(ip, {"services": set(), "names": set(), "txt": {}, "host": ""})
         for name, kind, val in parse_dns(data):
@@ -258,7 +259,7 @@ def wsd_scan(timeout=3.0, iface_ip=None):
     s.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 2)
     if iface_ip:
         s.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, socket.inet_aton(iface_ip))
-    found = {}
+    found: dict = {}
     try:
         probe = _WSD_PROBE.format(id=uuid.uuid4()).encode()
         for _ in range(2):
@@ -267,7 +268,7 @@ def wsd_scan(timeout=3.0, iface_ip=None):
         while time.time() < end:
             try:
                 data, (ip, _) = s.recvfrom(65535)
-            except socket.timeout:
+            except TimeoutError:
                 continue
             info = parse_wsd(data)
             if info:

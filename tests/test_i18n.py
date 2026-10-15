@@ -1,4 +1,3 @@
-import ast
 import os
 import sys
 import unittest
@@ -7,7 +6,7 @@ from panther import i18n
 from panther.lang_en import EN
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tools"))
-import i18n_check  # noqa: E402
+import i18n_check
 
 
 class CatalogueTests(unittest.TestCase):

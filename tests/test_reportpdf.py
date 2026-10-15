@@ -65,7 +65,7 @@ class PdfTests(unittest.TestCase):
     def test_a_real_pdf_is_written_with_text_and_image(self):
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         from PyQt6.QtGui import QColor, QGuiApplication, QImage
-        app = QGuiApplication.instance() or QGuiApplication([])
+        QGuiApplication.instance() or QGuiApplication([])
         img = QImage(400, 200, QImage.Format.Format_ARGB32); img.fill(QColor("#3366cc"))
         devs = [dev("192.168.1.%d" % i, "appareil-%d" % i) for i in range(2, 70)]          # assez long pour plusieurs pages
         html_text = reportpdf.build_html(devs, ["192.168.1.0/24"], image_name="map", warnings=["Réseau injoignable"])

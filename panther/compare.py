@@ -4,8 +4,7 @@ Module pur. Un « instantané » est la liste des appareils en ligne lors d'un s
 sens à comparer (pas de TTL ni d'heures qui changent à chaque scan). On compare les valeurs automatiques
 (pas le nom choisi à la main), pour qu'un renommage ne passe pas pour un changement de l'appareil.
 """
-from . import security
-from . import store
+from . import security, store
 from .i18n import N_, tr
 
 # Les libellés français servent aussi d'identifiants de changement : ils ne sont traduits qu'à l'affichage (`format_change`).

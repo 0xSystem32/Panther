@@ -2,8 +2,7 @@ import ipaddress
 import unittest
 from unittest import mock
 
-from panther import scanner
-from panther import topology
+from panther import scanner, topology
 from tests.test_snmp import FakeAgent, switch_data
 
 

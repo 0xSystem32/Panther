@@ -15,17 +15,9 @@ import subprocess
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from typing import Any
 
-from . import certs
-from . import dhcp
-from . import discovery
-from . import networks
-from . import security
-from . import snmp
-from . import topology
-from . import fingerprint
-from . import models
-from . import store
+from . import certs, dhcp, discovery, fingerprint, models, networks, security, snmp, store, topology
 from .i18n import tr
 
 log = logging.getLogger("panther.scanner")
@@ -37,7 +29,7 @@ QUICK_PORTS = (22, 53, 80, 135, 139, 443, 445, 554, 631, 8009, 9100, 62078)
 DEEP_PORTS = SCAN_PORTS + (25, 111, 389, 873, 1433, 1883, 2049, 3000, 5060, 5900, 7547, 8000, 8081,
                            8883, 8888, 9000, 10000, 32400, 34567, 37777)
 # Profondeur du scan : rapide (quelques secondes), normal, approfondi (plus lent, plus complet)
-PROFILES = {
+PROFILES: dict[str, dict[str, Any]] = {
     "rapide": dict(light=False, arp_rounds=1, arp_wait=1.2, arp_max=2.5, disc_ports=(80, 443, 22, 445, 62078), disc_timeout=0.3, routed_timeout=0.5, second_pass=False,
                    second_timeout=0, scan_ports=QUICK_PORTS, port_timeout=0.6, banners=False, names_timeout=1.0,
                    ssdp=2.0, mdns=2.0, lldp=10),
@@ -200,7 +192,7 @@ def ping_ttl(ip):
         return None
 
 
-_nb_info = {}
+_nb_info: dict = {}
 _nb_lock = threading.Lock()
 
 
@@ -277,7 +269,7 @@ def resolve_names(ip, timeout=1.5):
     def task(key, fn):
         try:
             out[key] = fn(ip) or ""
-        except Exception:  # noqa: BLE001 - une résolution ratée ne doit jamais bloquer le scan
+        except Exception:
             out[key] = ""
     threads = [threading.Thread(target=task, args=(k, f), daemon=True)
                for k, f in (("dns", _dns_name), ("nb", netbios_name), ("mdns", mdns_name))]
@@ -289,7 +281,7 @@ def resolve_names(ip, timeout=1.5):
     return out.get("dns", ""), out.get("nb", ""), out.get("mdns", "")
 
 
-_cert_cache = {}  # (ip, port) -> résumé du certificat lu par grab_banner ; consommé par _inspect (même schéma que _nb_info)
+_cert_cache: dict = {}  # (ip, port) -> résumé du certificat lu par grab_banner ; consommé par _inspect (même schéma que _nb_info)
 _cert_lock = threading.Lock()
 HTTP_PORTS = (80, 8000, 8008, 8080, 8081, 5000)
 TLS_PORTS = (443, 5001, 8443)
@@ -336,7 +328,7 @@ def grab_banner(ip, port, timeout=1.5):
         while len(data) < 8192 and time.time() < end:  # la page arrive souvent en plusieurs morceaux
             try:
                 chunk = s.recv(2048)
-            except socket.timeout:
+            except TimeoutError:
                 break
             if not chunk:
                 break
@@ -374,7 +366,7 @@ class Scanner:
         self.reset()
 
     def reset(self):
-        self.state = {"status": "idle", "progress": 0, "network": None,
+        self.state: dict[str, Any] = {"status": "idle", "progress": 0, "network": None,
                       "devices": {}, "networks": [], "neighbors": [], "neighbors_status": "", "paths": {},
                       "warnings": [], "snmp": [], "depth": "normal", "security": False, "started": None, "finished": None, "error": None}
 
@@ -420,7 +412,8 @@ class Scanner:
             net = local_network(self.iface)
             net["vlan"] = networks.vlan_ids().get(net["iface"])
             local = ipaddress.ip_network(net["cidr"])
-            extra_nets, early_warnings = [], []
+            extra_nets: list = []
+            early_warnings: list = []
             for t in ([] if self.profile.get("passive") else targets):  # écoute seule : pas de plages routées (il faudrait les sonder)
                 try:
                     n = networks.validate_cidr(t)  # refuse les plages publiques ou trop grandes
@@ -500,7 +493,9 @@ class Scanner:
             # en mode présence, SSDP/mDNS ne servent que s'il y a un appareil inconnu à identifier
             unknown_local = [ip for ip in found if ip != net["ip"] and self.aliases.get(arp.get(ip, ""), arp.get(ip, "")) not in self.known and ipaddress.ip_address(ip) in local]
             if self.cancel.is_set() or P.get("passive") or (P["light"] and not unknown_local):
-                ssdp, mdns, wsd = {}, {}, {}
+                ssdp: dict = {}
+                mdns: dict = {}
+                wsd: dict = {}
             else:
                 full = PROFILES["normal"] if P["light"] else P
                 res = discovery.scan_all(net["ip"], full["ssdp"], full["mdns"])  # multicast : réseau local
@@ -525,7 +520,7 @@ class Scanner:
                     return
                 try:
                     dev = self._inspect(ip, net, arp, extra)
-                except Exception as e:  # noqa: BLE001 - un appareil récalcitrant ne doit pas faire échouer tout le scan
+                except Exception as e:
                     log.warning("Analyse de %s impossible", ip, exc_info=True)
                     warnings.append(tr("Analyse de {ip} impossible : {e}", ip=ip, e=e))
                     n[0] += 1
@@ -552,13 +547,16 @@ class Scanner:
             self._apply_switch_hints(list(self.state["devices"].values()), snmp_info, nb.get("neighbors", []))
             self._set(status="done", progress=100, finished=time.time(), paths=paths, warnings=warnings,
                       snmp=snmp_info, neighbors=nb.get("neighbors", []), neighbors_status=nb.get("status", ""))
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             log.exception("Le scan a échoué")
             self._set(status="error", error=str(e))
 
     def _read_snmp(self, sources, all_nets, found):
         """Interroge les routeurs/switchs désignés par l'utilisateur. Retourne ARP, FDB, avertissements."""
-        arp, fdb, warnings, info = {}, {}, [], []
+        arp: dict = {}
+        fdb: dict = {}
+        warnings: list = []
+        info: list = []
         for src in sources:
             host, comm = src.get("host", ""), src.get("community", "public")
             try:
@@ -650,14 +648,14 @@ class Scanner:
         ss = extra["ssdp"].get(ip, {})
         wd = extra.get("wsd", {}).get(ip, {})
         names = sorted(md.get("names", []))
-        dns, nb_name, mdns_n = f_names.result() if active else ("", "", "")
+        dns, nb_name, mdns_n = f_names.result() if (active and f_names) else ("", "", "")
         hostname = (dns or nb_name or md.get("host") or mdns_n or (names[0] if names else "") or ss.get("friendly", "")
                     or extra.get("leases", {}).get(mac, ""))
         with _nb_lock:
             netbios = _nb_info.pop(ip, {})
         if me:
             hostname = socket.gethostname()
-        ttl = 64 if me else (f_ttl.result() if active else None)
+        ttl = 64 if me else (f_ttl.result() if (active and f_ttl) else None)
         bg.shutdown(wait=False)
         vendor = fingerprint.vendor_of(mac) or ss.get("manufacturer", "") or wd.get("name", "") or cert_vendor
         dev = {"ip": ip, "mac": mac, "vendor": vendor, "hostname": hostname,

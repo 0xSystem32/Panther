@@ -6,9 +6,9 @@ from PyQt6.QtWidgets import QApplication, QMessageBox
 from .. import i18n, networks, ouiupdate, secrets
 from ..i18n import tr
 from ..scanner import local_network
-from .theme import T, THEMES, THEME_MODES, make_style, resolve_theme, set_text_scale, text_scale_of
-from .util import log, snmp_secret
 from .settings_dialogs import NetworksDialog, OuiWorker
+from .theme import THEME_MODES, THEMES, T, make_style, resolve_theme, set_text_scale, text_scale_of
+from .util import log, snmp_secret
 from .wizard import WelcomeWizard, apply_welcome_settings
 
 

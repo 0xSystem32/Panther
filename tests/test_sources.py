@@ -96,7 +96,8 @@ class DhcpTests(unittest.TestCase):
         self.assertEqual(dhcp.parse_isc(text), {"aa:bb:cc:00:00:09": "recent"})
 
     def test_read_leases_ignores_missing_files_and_picks_the_right_format(self):
-        import os, tempfile
+        import os
+        import tempfile
         with tempfile.TemporaryDirectory() as d:
             a, b = os.path.join(d, "dnsmasq.leases"), os.path.join(d, "dhcpd.leases")
             with open(a, "w") as f:

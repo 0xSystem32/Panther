@@ -12,13 +12,14 @@ import shutil
 import tempfile
 import threading
 import time
+from typing import Any
 
 from . import security
 from .i18n import tr
 
 NET, VLAN = "192.168.1.0/24", "192.168.20.0/24"
-NETWORK = {"iface": "wlp3s0", "ip": "192.168.1.13", "cidr": NET, "gateway": "192.168.1.1", "vlan": None, "kind": "wifi"}
-NETS = [{"cidr": NET, "kind": "local", "vlan": None}, {"cidr": VLAN, "kind": "routé", "vlan": 20}]
+NETWORK: dict[str, Any] = {"iface": "wlp3s0", "ip": "192.168.1.13", "cidr": NET, "gateway": "192.168.1.1", "vlan": None, "kind": "wifi"}
+NETS: list[dict[str, Any]] = [{"cidr": NET, "kind": "local", "vlan": None}, {"cidr": VLAN, "kind": "routé", "vlan": 20}]
 
 
 def extra():

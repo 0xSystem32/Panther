@@ -173,7 +173,7 @@ def active_probes(ip, ports):
         if fn:
             try:
                 r = fn(ip)
-            except Exception:  # noqa: BLE001 - une sonde ne doit jamais faire échouer le scan
+            except Exception:
                 log.debug("Sonde du port %s ratée sur %s", p, ip, exc_info=True)
                 r = None
             if r:

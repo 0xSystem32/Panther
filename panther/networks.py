@@ -8,6 +8,7 @@ import re
 import socket
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
+
 from .i18n import N_, TrDict, tr
 
 MAX_HOSTS = 4096  # /20
@@ -175,7 +176,8 @@ def discover_reachable(exclude=(), progress=None):
     excl = [ipaddress.ip_network(e) for e in exclude]
     cands = [(ip, cidr) for ip, cidr in candidate_gateways()
              if not any(ipaddress.ip_address(ip) in e for e in excl)]
-    found, done = {}, [0]
+    found: dict = {}
+    done = [0]
 
     def probe(item):
         ip, cidr = item

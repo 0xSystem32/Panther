@@ -66,11 +66,11 @@ effort **S** (< 1 h) · **M** (quelques heures) · **L** (plus d'une journée).
 
 ## 6. Qualité du code
 - [x] `gui.py` (3 400 lignes) découpé en package `panther/ui/` : 9 modules + 7 mixins pour la fenêtre principale (le plus grand : 447 lignes) ; `gui.py` réexporte les noms publics. Le découpage a révélé un chemin d'icône cassé, désormais couvert par un test
-- [ ] **P2 · M** Typage (`mypy`) et analyse statique (`ruff`) dans la CI
-- [ ] **P2 · M** Couverture de tests mesurée (objectif ≥ 85 % sur le moteur) et tests « fuzz » des analyseurs (mDNS, SNMP, LLDP, bannières)
-- [ ] **P2 · S** Tests de performance (carte avec 250 nœuds, scan simulé)
+- [x] `ruff` (E, F, W, B, UP, I) propre et `mypy` propre sur tout `panther/` (l'interface masque seulement 10 familles d'erreurs dues aux stubs PyQt6 et aux mixins), dans la CI + `pre-commit`
+- [x] Couverture mesurée dans la CI (moteur 91 %, seuil 85 %) ; tests « fuzz » déterministes des analyseurs (SNMP, LLDP/CDP, DNS/mDNS, SSDP, WS-Discovery, NetBIOS, bannières HTTP, baux DHCP, certificats DER)
+- [x] Tests de performance : 250 appareils (historique, comparaison, dispositions, exports, carte, mises à jour incrémentales, mini-carte), seuils larges contre les régressions quadratiques
 - [x] Tests d'interface automatisés hors écran intégrés à la CI (`tests/test_gui.py`)
-- [ ] **P3 · S** `pre-commit`, `CONTRIBUTING.md`, modèles de tickets
+- [x] `pre-commit`, `CONTRIBUTING.md`, modèles de tickets
 
 ## 7. Distribution
 - [ ] **P1 · S** `CHANGELOG.md` et publication automatique d'une version GitHub (wheel + `.deb`) à chaque étiquette

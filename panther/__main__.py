@@ -73,7 +73,7 @@ def main(argv=None):
             from . import demo
             demo_dir = demo.isolate()  # avant tout le reste : la vraie configuration n'est jamais touchée
         except ImportError as e:
-            raise SystemExit(tr("Le mode démonstration demande PyQt6 ({e}).", e=e))
+            raise SystemExit(tr("Le mode démonstration demande PyQt6 ({e}).", e=e)) from e
     plog.setup(verbose=a.verbose)
     fingerprint.load_all_oui(os.path.dirname(os.path.abspath(__file__)))
     if a.cli:
@@ -85,7 +85,7 @@ def main(argv=None):
         try:
             from . import gui
         except ImportError as e:  # PyQt6 absent : on l'explique au lieu d'afficher une trace
-            raise SystemExit(tr("L'interface graphique demande PyQt6 ({e}).\nInstallez-le (pip install PyQt6) ou utilisez --cli / --web.", e=e))
+            raise SystemExit(tr("L'interface graphique demande PyQt6 ({e}).\nInstallez-le (pip install PyQt6) ou utilisez --cli / --web.", e=e)) from e
         try:
             gui.main(demo=a.demo, lang=a.lang)
         finally:

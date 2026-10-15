@@ -12,6 +12,7 @@ import socket
 import struct
 import subprocess
 import time
+from typing import Any
 
 log = logging.getLogger("panther.topology")
 CDP_DST = bytes.fromhex("01000ccccccc")
@@ -56,7 +57,7 @@ def _id(subtype, b):
 
 
 def parse_lldp(p):
-    n = {"proto": "LLDP"}
+    n: dict[str, Any] = {"proto": "LLDP"}
     off = 0
     while off + 2 <= len(p):
         hdr = struct.unpack(">H", p[off: off + 2])[0]
@@ -88,7 +89,7 @@ def parse_lldp(p):
 
 
 def parse_cdp(p):
-    n = {"proto": "CDP"}
+    n: dict[str, Any] = {"proto": "CDP"}
     off = 4  # version, ttl, checksum
     while off + 4 <= len(p):
         t, ln = struct.unpack(">HH", p[off: off + 4])

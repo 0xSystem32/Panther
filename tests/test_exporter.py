@@ -1,7 +1,6 @@
 import csv
 import io
 import json
-import time
 import unittest
 
 from panther import exporter, security

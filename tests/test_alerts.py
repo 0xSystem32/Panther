@@ -336,7 +336,8 @@ class SendEmailTests(Base):
             srv.shutdown(); srv.server_close()
         rec = h.log[0]
         self.assertEqual((rec["from"], rec["to"]), ("<panther@x.fr>", ["<moi@x.fr>", "<toi@x.fr>"]))
-        import email, email.policy
+        import email
+        import email.policy
         msg = email.message_from_string(rec["data"], policy=email.policy.default)
         self.assertEqual(msg["Subject"], "Panther : 2 événements")                          # accents encodés puis décodés correctement
         self.assertIn("Nouvel appareil : cam", msg.get_content())

@@ -107,7 +107,6 @@ class GrabBannerTests(unittest.TestCase):
             c, _ = srv.accept(); c.sendall(b"SSH-2.0-OpenSSH_9.2p1 Debian\r\nsecond line\r\n"); c.close()
         threading.Thread(target=serve_once, daemon=True).start()
         try:
-            scanner.TLS_PORTS  # (un port non web quelconque est lu comme une simple bannière)
             self.assertEqual(scanner.grab_banner("127.0.0.1", port), "SSH-2.0-OpenSSH_9.2p1 Debian")
         finally:
             srv.close()

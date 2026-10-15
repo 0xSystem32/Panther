@@ -1,25 +1,44 @@
 """Fenêtre principale : assemble les mixins et construit le menu et la barre d'outils."""
 import json
 
-from PyQt6.QtCore import QSettings, QTimer, Qt
+from PyQt6.QtCore import QSettings, Qt, QTimer
 from PyQt6.QtGui import QAction, QActionGroup, QGuiApplication
-from PyQt6.QtWidgets import QComboBox, QFormLayout, QFrame, QGraphicsScene, QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMessageBox, QProgressBar, QPushButton, QScrollArea, QSplitter, QTabWidget, QTableWidget, QToolBar, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import (
+    QComboBox,
+    QFormLayout,
+    QFrame,
+    QGraphicsScene,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMainWindow,
+    QMessageBox,
+    QProgressBar,
+    QPushButton,
+    QScrollArea,
+    QSplitter,
+    QTableWidget,
+    QTabWidget,
+    QToolBar,
+    QVBoxLayout,
+    QWidget,
+)
 
 from .. import history, i18n, networks, rules
 from ..i18n import plural, tr
 from ..scanner import Scanner
-from .theme import TEXT_SIZES, THEME_MODES
-from .util import SECURITY_INFO
-from .widgets import ElidedLabel, RefreshCombo
-from .mapview import MapView
-from .settings_dialogs import AlertsDialog
 from .devices import DevicesMixin
 from .mapctl import MapMixin
+from .mapview import MapView
 from .panel import PanelMixin
 from .prefs import PrefsMixin
 from .reports import ReportsMixin
 from .scan import ScanMixin
+from .settings_dialogs import AlertsDialog
 from .tables import TablesMixin
+from .theme import TEXT_SIZES, THEME_MODES
+from .util import SECURITY_INFO
+from .widgets import ElidedLabel, RefreshCombo
 
 
 class Main(QMainWindow, ScanMixin, MapMixin, TablesMixin, PanelMixin, DevicesMixin, ReportsMixin, PrefsMixin):
@@ -229,7 +248,7 @@ class Main(QMainWindow, ScanMixin, MapMixin, TablesMixin, PanelMixin, DevicesMix
             a.triggered.connect(lambda _c, mm=mode: self.set_theme_mode(mm)); self.theme_actions[mode] = a
         self.theme_actions[self.theme_mode].setChecked(True)
         size_menu = m.addMenu(tr("Taille du texte")); sgroup = QActionGroup(self); self.size_actions = {}
-        for key, label, scale in TEXT_SIZES:
+        for key, label, _scale in TEXT_SIZES:
             a = QAction(tr(label), self, checkable=True); sgroup.addAction(a); size_menu.addAction(a)
             a.triggered.connect(lambda _c, kk=key: self.set_text_size(kk)); self.size_actions[key] = a
         self.size_actions[self.text_size].setChecked(True)

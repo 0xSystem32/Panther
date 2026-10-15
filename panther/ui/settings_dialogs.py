@@ -2,8 +2,24 @@
 import ipaddress
 import os
 
-from PyQt6.QtCore import QThread, Qt, pyqtSignal
-from PyQt6.QtWidgets import QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPushButton, QSpinBox, QVBoxLayout
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QFileDialog,
+    QFormLayout,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QPushButton,
+    QSpinBox,
+    QVBoxLayout,
+)
 
 from .. import alerts, networks, ouiupdate, schedule, secrets, security
 from ..i18n import N_, tr
@@ -21,7 +37,7 @@ class AlertWorker(QThread):
     def run(self):
         try:
             res = alerts.dispatch(self.cfg, self.events, webhook_url=self.webhook_url, smtp_password=self.smtp_password)
-        except Exception as e:  # noqa: BLE001 - jamais d'exception qui remonte d'un thread d'alerte
+        except Exception as e:
             log.exception("Envoi des alertes")
             res = [("alertes", False, str(e))]
         self.finished_with.emit(res)
@@ -205,7 +221,7 @@ class OuiWorker(QThread):
             self.done.emit(ouiupdate.update())
         except ouiupdate.UpdateError as e:
             self.failed.emit(str(e))
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             log.exception("Mise à jour de la base des fabricants")
             self.failed.emit(str(e))
 

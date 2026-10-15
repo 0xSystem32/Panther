@@ -6,6 +6,7 @@ jamais un dossier, jamais un lien symbolique, jamais autre chose qui se trouvera
 import os
 import re
 import time
+
 from .i18n import N_, TrDict, tr
 
 PERIODS = {"daily": 24 * 3600, "weekly": 7 * 24 * 3600}

@@ -179,6 +179,7 @@ limite la taille des plages, n'écoute que sur `127.0.0.1` pour son interface we
     python3 -m unittest discover -s tests -t .                       # moteur (bibliothèque standard seule)
     QT_QPA_PLATFORM=offscreen .venv/bin/python -m unittest discover -s tests -t .   # + interface et PDF (PyQt6)
     python3 tools/i18n_check.py                                      # tous les textes sont traduits
+    ruff check panther tests tools && mypy                           # analyse statique (voir CONTRIBUTING.md)
     python3 tools/update_oui.py                                      # met à jour la base des fabricants (IEEE)
     QT_QPA_PLATFORM=offscreen .venv/bin/python tools/make_screenshots.py [fr|en]   # régénère captures et GIF (réseau fictif)
 

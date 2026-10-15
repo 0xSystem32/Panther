@@ -10,7 +10,7 @@ import sys
 import urllib.request
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-from panther import fingerprint  # noqa: E402
+from panther import fingerprint
 
 URL = "https://standards-oui.ieee.org/oui/oui.csv"
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "panther", "oui.txt")

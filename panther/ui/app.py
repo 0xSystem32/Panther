@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import QApplication
 
 from .. import fingerprint, i18n
 from ..i18n import tr
-from .theme import T, THEMES, THEME_MODES, make_style, resolve_theme, set_text_scale, text_scale_of
+from .theme import THEME_MODES, THEMES, T, make_style, resolve_theme, set_text_scale, text_scale_of
 from .window import Main
 from .wizard import WelcomeWizard, apply_welcome_settings, first_run_needed
 

@@ -7,8 +7,8 @@ from PyQt6.QtWidgets import QFileDialog, QMessageBox
 
 from .. import compare, exporter, history, reportpdf, schedule
 from ..i18n import tr
-from .util import log
 from .settings_dialogs import ReportScheduleDialog
+from .util import log
 
 
 class ReportsMixin:

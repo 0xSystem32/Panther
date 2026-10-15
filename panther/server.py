@@ -3,10 +3,10 @@ import json
 import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from .scanner import Scanner
 from . import i18n
 from .i18n import tr
 from .labels import TYPE_LABELS
+from .scanner import Scanner
 
 STATIC = os.path.join(os.path.dirname(__file__), "static")
 TYPES = {".html": "text/html", ".js": "text/javascript", ".css": "text/css"}

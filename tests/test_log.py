@@ -48,7 +48,8 @@ class LogTests(unittest.TestCase):
 
     def test_uncaught_exception_is_logged_with_its_traceback(self):
         log.setup(path=self.path)
-        import contextlib, io
+        import contextlib
+        import io
         try:
             raise ValueError("boum")
         except ValueError:

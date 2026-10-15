@@ -10,9 +10,9 @@ from PyQt6.QtWidgets import QFileDialog, QMessageBox
 
 from .. import history, layout, security
 from ..i18n import tr
-from .theme import T, THEMES
-from .util import KEY_ROLE, LABELS, dkey, log, status_text
 from .mapview import ElbowLink, Hub, Link, Node, Zone
+from .theme import THEMES, T
+from .util import KEY_ROLE, LABELS, dkey, log, status_text
 
 
 class MapMixin:

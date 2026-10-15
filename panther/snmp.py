@@ -5,9 +5,10 @@ adresses MAC des hôtes d'autres VLAN, sa table de transmission (FDB) donne le p
 Aucune écriture (pas de SET), aucune devinette de communauté.
 """
 import ipaddress
-import socket
-import struct
 import random
+import socket
+from typing import Any
+
 from .i18n import tr
 
 GET, GETNEXT, RESPONSE, GETBULK = 0xA0, 0xA1, 0xA2, 0xA5
@@ -157,7 +158,7 @@ def _exchange(host, community, pdu_type, oids, port, timeout, retries=2, nonrep=
                         if err:
                             raise SnmpError(tr("erreur SNMP {err}", err=err))
                         return vbs
-            except socket.timeout:
+            except TimeoutError:
                 continue
         raise SnmpError(tr("pas de réponse (communauté incorrecte, SNMP désactivé ou filtré)"))
     finally:
@@ -170,7 +171,8 @@ def get(host, community, oids, port=161, timeout=2.0):
 
 def walk(host, community, base, port=161, timeout=2.0, max_rows=20000):
     """Parcourt un sous-arbre (GETBULK). -> [(oid, valeur)] dans l'ordre."""
-    out, last, base_t = [], base, oid_tuple(base)
+    out: list = []
+    last, base_t = base, oid_tuple(base)
     while len(out) < max_rows:
         vbs = _exchange(host, community, GETBULK, [last], port, timeout, nonrep=0, maxrep=20)
         progressed = False
@@ -201,7 +203,7 @@ def read_tables(host, community, port=161, timeout=2.0):
     kw = dict(port=port, timeout=timeout)
     info = get(host, community, ["1.3.6.1.2.1.1.5.0", "1.3.6.1.2.1.1.1.0"], **kw)  # lève SnmpError si muet
     txt = lambda v: v.decode("utf-8", "ignore") if isinstance(v, bytes) else ""
-    res = {"name": txt(info.get("1.3.6.1.2.1.1.5.0")), "descr": txt(info.get("1.3.6.1.2.1.1.1.0"))[:120],
+    res: dict[str, Any] = {"name": txt(info.get("1.3.6.1.2.1.1.5.0")), "descr": txt(info.get("1.3.6.1.2.1.1.1.0"))[:120],
            "arp": {}, "fdb": {}, "vlans": {}}
 
     def safe(base):

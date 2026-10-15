@@ -24,9 +24,17 @@ sys.path.insert(0, ROOT)
 from PyQt6.QtCore import QSettings  # noqa: E402
 from PyQt6.QtWidgets import QApplication  # noqa: E402
 
-from panther import compare, fingerprint, gui, history, reportpdf, security, store  # noqa: E402
+from panther import (  # noqa: E402
+    compare,
+    fingerprint,
+    gui,
+    history,
+    i18n,
+    reportpdf,
+    security,
+    store,
+)
 from panther import demo as demo_mod  # noqa: E402
-from panther import i18n  # noqa: E402
 
 i18n.set_language(LANG)
 

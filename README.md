@@ -176,6 +176,7 @@ misuse.
     python3 -m unittest discover -s tests -t .                       # engine (standard library only)
     QT_QPA_PLATFORM=offscreen .venv/bin/python -m unittest discover -s tests -t .   # + interface and PDF (PyQt6)
     python3 tools/i18n_check.py                                      # every text is translated
+    ruff check panther tests tools && mypy                           # static analysis (see CONTRIBUTING.md)
     python3 tools/update_oui.py                                      # update the vendor database (IEEE)
     QT_QPA_PLATFORM=offscreen .venv/bin/python tools/make_screenshots.py [fr|en]   # regenerate screenshots and GIF (fictional network)
 

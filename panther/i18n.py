@@ -10,7 +10,7 @@ import os
 
 LANGUAGES = {"fr": "Français", "en": "English"}
 _lang = "fr"
-_table = {}
+_table: dict[str, str] = {}
 
 
 def detect(env=None):

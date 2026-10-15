@@ -57,7 +57,8 @@ def _time(tag, content):
 
 def _san(ext_value):
     """Noms DNS de l'extension subjectAltName."""
-    out, (_, seq, _) = [], snmp.parse_tlv(ext_value, 0)
+    out: list = []
+    (_, seq, _) = snmp.parse_tlv(ext_value, 0)
     off = 0
     while off < len(seq) and len(out) < 10:
         tag, val, off = snmp.parse_tlv(seq, off)

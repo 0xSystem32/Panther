@@ -35,3 +35,39 @@ include = ["panther*"]
 
 [tool.setuptools.package-data]
 panther = ["oui.txt", "static/*", "assets/*"]
+
+[tool.ruff]
+line-length = 160
+target-version = "py312"
+extend-exclude = [".venv", "dist", "build"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "UP", "I", "RUF100"]
+ignore = ["E741", "E501", "E701", "E702", "E731", "UP031", "B905"]  # lignes longues et « a; b » sur une ligne : style du projet
+
+[tool.ruff.lint.isort]
+known-first-party = ["panther"]
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+warn_unused_ignores = true
+check_untyped_defs = true
+files = ["panther"]
+
+# Moteur : vérifié sans exception. Interface : les mixins de la fenêtre lisent des attributs créés dans Main.__init__ et les stubs de
+# PyQt6 déclarent presque tout « Optional » ; ces familles d'erreurs sont masquées ICI seulement (le reste est vérifié).
+[[tool.mypy.overrides]]
+module = ["panther.ui.*", "panther.gui"]
+disable_error_code = ["attr-defined", "union-attr", "call-overload", "arg-type", "has-type", "assignment", "method-assign", "var-annotated",
+                      "func-returns-value", "misc"]
+
+[tool.ruff.lint.per-file-ignores]
+"panther/gui.py" = ["F401", "I001"]  # simple façade : réexporte les noms publics de panther/ui/
+
+[tool.coverage.run]
+source = ["panther"]
+
+[tool.coverage.report]
+skip_empty = true
+exclude_also = ["if __name__ == .__main__.:"]

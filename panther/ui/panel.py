@@ -7,11 +7,11 @@ from PyQt6.QtWidgets import QLabel, QMessageBox
 
 from .. import fingerprint, history, models, security
 from ..i18n import plural, tr
-from .theme import sev_color
+from .dialogs import MetaDialog
 from .icons import type_pixmap
+from .theme import sev_color
 from .util import EVENT_LABELS, LABELS, tip, when, when_short
 from .widgets import PresenceBar
-from .dialogs import MetaDialog
 
 
 class PanelMixin:

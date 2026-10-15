@@ -1,0 +1,21 @@
+# pip install pre-commit && pre-commit install
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.17.0
+    hooks:
+      - id: ruff
+        args: [--fix]
+  - repo: local
+    hooks:
+      - id: traductions
+        name: traductions complètes (tools/i18n_check.py)
+        entry: python3 tools/i18n_check.py
+        language: system
+        pass_filenames: false
+        files: ^panther/.*\.py$
+      - id: tests-moteur
+        name: tests (bibliothèque standard)
+        entry: python3 -m unittest discover -s tests -t .
+        language: system
+        pass_filenames: false
+        stages: [pre-push]

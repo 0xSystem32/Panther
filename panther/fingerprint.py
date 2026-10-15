@@ -55,7 +55,7 @@ _SUFFIX_RE = re.compile(r"[,.]?\s*\b(inc|ltd|llc|gmbh|co|corp|corporation|compan
 def canonical_vendor(name):
     m = _CANON_RE.search(name)
     if m:
-        return _CANON[m.lastindex - 1][0]
+        return _CANON[(m.lastindex or 1) - 1][0]
     return _SUFFIX_RE.sub("", name).strip(" ,.;")[:40] or name[:40]
 
 
@@ -82,6 +82,7 @@ def shorten_vendor(name):
 def load_all_oui(package_dir):
     """Base livrée avec Panther, puis celle de l'utilisateur (`~/.config/Panther/oui.txt`) qui la complète et la corrige."""
     import os
+
     from . import ouiupdate
     load_extra_oui(os.path.join(package_dir, "oui.txt"))
     load_extra_oui(ouiupdate.USER_PATH)
@@ -198,7 +199,8 @@ def _model_text(dev):
 
 def classify_detail(dev):
     """Retourne (type, confiance 0-100, raisons[]). Chaque indice ajoute des points à un type."""
-    score, why = {}, {}
+    score: dict = {}
+    why: dict = {}
 
     def add(kind, pts, reason):
         score[kind] = score.get(kind, 0) + pts
@@ -244,8 +246,9 @@ def classify_detail(dev):
                                 (N_("nom"), " ".join([dev.get("hostname") or ""] + dev.get("mdns_names", []) + [dev.get("http_info") or ""]).lower(), 0.6),
                                 (N_("certificat"), ((dev.get("cert") or {}).get("indicators") or "").lower(), 0.6)):
         for pat, kind, pts in MODEL_PATTERNS:
-            if kind not in seen and re.search(pat, text):
-                add(kind, pts * factor, tr("{label} évocateur ({match})", label=tr(label), match=re.search(pat, text).group(0).strip()))
+            hit = re.search(pat, text) if kind not in seen else None
+            if hit:
+                add(kind, pts * factor, tr("{label} évocateur ({match})", label=tr(label), match=hit.group(0).strip()))
                 seen.add(kind)
     v = dev["vendor"]
     for kind, (vendors, pts) in VENDOR_PRIORS.items():
@@ -277,7 +280,7 @@ def classify_detail(dev):
         return forced[0], 100, [forced[1]] + [r for r in why.get(forced[0], []) if r != forced[1]][:4]
     if not score:
         return "unknown", 0, [tr("aucun indice exploitable")]
-    kind = max(score, key=score.get)
+    kind = max(score, key=lambda k: score[k])
     if score[kind] < 15:
         return "unknown", int(score[kind]), why[kind]
     return kind, int(min(100, score[kind])), why[kind][:6]

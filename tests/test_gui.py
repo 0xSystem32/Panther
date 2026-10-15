@@ -12,8 +12,8 @@ if HAS_QT:
     from PyQt6.QtCore import QPointF, QSettings, Qt
     from PyQt6.QtWidgets import QApplication, QMenu, QTableWidget, QWidget
 
+    from panther import alerts, gui, history, ouiupdate, reportpdf, rules, schedule, secrets, security, store, wol
     from panther.ui import dialogs, theme
-    from panther import alerts, compare, gui, history, ouiupdate, reportpdf, rules, schedule, secrets, security, store, wol
 
 NET = "192.168.1.0/24"
 
@@ -351,7 +351,6 @@ class GuiTests(unittest.TestCase):
         self.scan(network())
         w = self.w
         labels = []
-        import panther.gui as g
         orig = QMenu.exec
         QMenu.exec = lambda self_, pos=None: labels.extend(a.text() for a in self_.actions())
         try:
@@ -717,7 +716,7 @@ class GuiTests(unittest.TestCase):
                     self.assertGreaterEqual(self.contrast(t[fg], bg), 4.5, f"{name}: {fg} sur {bg}")
             self.assertGreaterEqual(self.contrast(t["on_acc"], t["acc"]), 4.5, f"{name}: texte du bouton principal")
             self.assertGreaterEqual(self.contrast(t["fg"], t["acc_bg"]), 4.5, f"{name}: texte sélectionné")
-            for kind, colour in gui.TYPE_COLORS.items():                                         # icônes de la carte : 3:1 suffit (éléments graphiques)
+            for kind in gui.TYPE_COLORS:                                         # icônes de la carte : 3:1 suffit (éléments graphiques)
                 gui.T.update(t)
                 self.assertGreaterEqual(self.contrast(gui.type_color(kind), t["bg"]), 3.0, f"{name}: icône {kind}")
         gui.T.update(gui.THEMES["dark"])
@@ -955,6 +954,7 @@ class GuiTests(unittest.TestCase):
     # --- mode démonstration
     def test_demo_window_is_populated_from_the_fictional_network_and_never_touches_the_network(self):
         import socket
+
         from panther import demo
         real_socket, calls = socket.socket, []
         socket.socket = lambda *a, **k: calls.append(a) or (_ for _ in ()).throw(AssertionError("accès réseau en mode démo"))
@@ -1180,7 +1180,6 @@ class GuiTests(unittest.TestCase):
         self.scan(network())
         w = self.w
         labels = []
-        import panther.gui as g
         orig = QMenu.exec
         QMenu.exec = lambda self_, pos=None: labels.extend(a.text() for a in self_.actions())
         try:
@@ -1275,7 +1274,8 @@ class GuiTests(unittest.TestCase):
         history.set_meta(tv, tags="enfants", group="Salon", note="meuble"); history.set_trusted([tv], True)
         csv_path, json_path = os.path.join(self.tmp.name, "e.csv"), os.path.join(self.tmp.name, "e.json")
         w.write_export(csv_path, "csv"); w.write_export(json_path, "json")
-        import csv, json
+        import csv
+        import json
         with open(csv_path, encoding="utf-8", newline="") as f:
             rows = list(csv.DictReader(f))
         by = {r["Adresse IP"]: r for r in rows}

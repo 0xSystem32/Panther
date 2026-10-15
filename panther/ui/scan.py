@@ -12,8 +12,8 @@ from PyQt6.QtWidgets import QSystemTrayIcon
 from .. import alerts, history, identity, networks, security, store
 from ..i18n import plural, tr
 from .icons import type_pixmap
-from .util import dkey, log
 from .settings_dialogs import AlertWorker
+from .util import dkey, log
 
 
 class ScanMixin:
@@ -184,7 +184,7 @@ class ScanMixin:
             if not cfg["enabled"] or (cfg["events"]["auto_only"] and not auto) or not (cfg["webhook"]["enabled"] or cfg["email"]["enabled"]):
                 return
             events = alerts.build_events(online, res, fr, cfg, res.get("event_list", []))
-        except Exception:  # noqa: BLE001 - les alertes ne doivent jamais gêner l'affichage du scan
+        except Exception:
             log.exception("Préparation des alertes")
             return
         if not events:

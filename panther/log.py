@@ -30,7 +30,7 @@ def setup(verbose=False, path=None, console=False):
     root.setLevel(logging.DEBUG if verbose else logging.INFO)
     root.propagate = False
     fmt = logging.Formatter(_FORMAT)
-    handlers = []
+    handlers: list[logging.Handler] = []
     try:
         target = path or PATH
         os.makedirs(os.path.dirname(target), exist_ok=True)

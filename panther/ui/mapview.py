@@ -8,8 +8,8 @@ from PyQt6.QtWidgets import QFrame, QGraphicsItem, QGraphicsLineItem, QGraphicsP
 from .. import security
 from ..i18n import tr
 from . import theme
-from .theme import T, fs, sev_color, type_color
 from .icons import draw_icon, type_pixmap
+from .theme import T, fs, sev_color, type_color
 from .util import LABELS, seen_label, tip
 
 

@@ -3,7 +3,6 @@ import unittest
 from unittest import mock
 
 from panther import scanner
-from panther import topology
 
 
 def wait(sc):
@@ -100,7 +99,7 @@ class ScanFlowTests(unittest.TestCase):
         def spy(self_, targets=None, snmp_sources=None, depth="normal", security=False, iface=None, known=None):
             asked.append(iface); return orig(self_, targets, snmp_sources, depth, security, iface, known)
         with mock.patch.object(scanner.Scanner, "start", spy):
-            r = self.run_scan([], depth="rapide")
+            self.run_scan([], depth="rapide")
         self.assertEqual(asked, [None])                     # sans choix : interface automatique
         sc = scanner.Scanner(); sc.start([], iface="eth9")
         self.assertEqual(sc.iface, "eth9")

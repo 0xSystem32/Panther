@@ -9,7 +9,6 @@ from .. import i18n, store
 from ..i18n import N_, TrDict, tr
 from ..labels import TYPE_LABELS
 
-
 log = logging.getLogger("panther.gui")
 
 

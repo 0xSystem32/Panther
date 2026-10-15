@@ -2,8 +2,7 @@ import os
 import tempfile
 import unittest
 
-from panther import compare
-from panther import history
+from panther import compare, history
 
 NET = "192.168.1.0/24"
 

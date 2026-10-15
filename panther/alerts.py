@@ -99,7 +99,7 @@ def save(cfg, path=None):
 def build_events(devices, record, findings, cfg, history_events=()):
     """Événements à signaler après un scan : [{kind, title, detail}]. Rien pour la première analyse (référence)."""
     ev = cfg["events"]
-    out = []
+    out: list = []
     if record.get("baseline") and not findings.get("new"):
         return out
     by_key = {(d.get("key") or d.get("mac") or "ip:" + d.get("ip", "")): d for d in devices}
@@ -146,7 +146,7 @@ def webhook_request(url, fmt, title, text, events=()):
         raise AlertError(tr("l'URL du webhook doit commencer par http:// ou https://"))
     if fmt == "discord":
         body, ctype = json.dumps({"content": f"**{title}**\n{text}"[:1900]}).encode(), "application/json"
-        headers = {}
+        headers: dict = {}
     elif fmt == "slack":
         body, ctype = json.dumps({"text": f"*{title}*\n{text}"}).encode(), "application/json"
         headers = {}
@@ -181,7 +181,7 @@ def send_email(em, password, title, text, timeout=15):
     msg.set_content(text)
     try:
         if em["security"] == "ssl":
-            smtp = smtplib.SMTP_SSL(em["host"], em["port"], timeout=timeout, context=ssl.create_default_context())  # certificat vérifié
+            smtp: smtplib.SMTP = smtplib.SMTP_SSL(em["host"], em["port"], timeout=timeout, context=ssl.create_default_context())  # certificat vérifié
         else:
             smtp = smtplib.SMTP(em["host"], em["port"], timeout=timeout)
         with smtp:

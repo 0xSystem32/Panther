@@ -2,14 +2,32 @@
 import os
 import sqlite3
 
-from PyQt6.QtCore import QUrl, Qt
+from PyQt6.QtCore import Qt, QUrl
 from PyQt6.QtGui import QColor, QDesktopServices, QIcon
-from PyQt6.QtWidgets import QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QFrame, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPlainTextEdit, QPushButton, QSpinBox, QTableWidget, QTableWidgetItem, QVBoxLayout
+from PyQt6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QFileDialog,
+    QFormLayout,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPlainTextEdit,
+    QPushButton,
+    QSpinBox,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+)
 
 from .. import compare, fingerprint, history, privacy, rules, store
 from ..i18n import N_, plural, tr
-from .theme import T
 from .icons import type_pixmap
+from .theme import T
 from .util import LABELS, human_size, seen_label, tip, when
 
 

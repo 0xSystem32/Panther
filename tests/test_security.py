@@ -166,7 +166,7 @@ class AnalyzeTests(unittest.TestCase):
 
 class TitleTests(unittest.TestCase):
     def test_every_rule_id_has_a_readable_title(self):
-        for fid, _s, title, *_ in sec.PORT_RULES.values():
+        for fid, _s, _title, *_ in sec.PORT_RULES.values():
             same_id = {x[2] for x in sec.PORT_RULES.values() if x[0] == fid}      # telnet : ports 23 et 2323, deux titres possibles
             self.assertIn(sec.title_of(fid), same_id)
         for f in sec.OPEN_PROBE.values():
