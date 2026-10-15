@@ -242,7 +242,7 @@ class Detector(QThread):
 class NetworksDialog(QDialog):
     """Choix des plages à scanner en plus du réseau local."""
 
-    def __init__(self, local_cidr, selected, snmp_sources, parent=None):
+    def __init__(self, local_cidr, selected, snmp_sources, parent=None, auto=True):
         super().__init__(parent)
         self.setWindowTitle(tr("Réseaux à scanner"))
         self.setMinimumSize(580, 640)
@@ -266,7 +266,11 @@ class NetworksDialog(QDialog):
         buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(tr("Annuler"))
         buttons.accepted.connect(self.accept); buttons.rejected.connect(self.reject)
         lay = QVBoxLayout(self); lay.setContentsMargins(20, 20, 20, 16); lay.setSpacing(12)
-        for w in (intro, self.list):
+        self.auto = QCheckBox(tr("Ajouter automatiquement les réseaux auxquels cette machine est déjà reliée (autres interfaces, routes, VLAN)"))
+        self.auto.setChecked(auto)
+        self.auto.setToolTip(tr("Rien n'est sondé pour les trouver : Panther lit les interfaces et les routes du système. Les interfaces virtuelles "
+                                "(Docker, machines virtuelles) sont ignorées."))
+        for w in (intro, self.auto, self.list):
             lay.addWidget(w)
         lay.addLayout(row); lay.addWidget(self.msg); lay.addWidget(self.detect); lay.addWidget(note)
         sep = QFrame(); sep.setObjectName("sep"); lay.addWidget(sep)
@@ -389,6 +393,9 @@ class NetworksDialog(QDialog):
         if self.detector and self.detector.isRunning():
             self.detector.wait(30000)
         super().done(r)
+
+    def auto_enabled(self):
+        return self.auto.isChecked()
 
     def selected(self):
         return [it.data(Qt.ItemDataRole.UserRole) for it in (self.list.item(i) for i in range(self.list.count()))

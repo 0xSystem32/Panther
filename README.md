@@ -27,7 +27,7 @@ only the graphical interface uses PyQt6. The interface is available in **English
   type*; your path to the Internet is drawn in blue, node positions are remembered per layout. A **mini-map** appears when
   you zoom in (click or drag it to move), **Shift-drag** selects several devices (or **Ctrl-click**), and a selection can be
   trusted or tagged in one go; *View → Center on selection* (`Ctrl+Shift+0`) finds a device again.
-- **Several networks and VLANs**: ranges typed by hand or detected (routes, 802.1Q interfaces, gateways), traceroute path,
+- **Several networks and VLANs**: networks the machine is already connected to (other interfaces, routes, VLANs) are scanned automatically; ranges typed by hand or detected (routes, 802.1Q interfaces, gateways), traceroute path,
   warning when a network does not answer, read-only **SNMP** (MAC addresses and switch ports of other VLANs), **LLDP/CDP**
   neighbours.
 - **IPv6 (addresses)**: the IPv6 addresses of each device (read from the kernel neighbour table after one multicast ping) are shown in the panel and exported; discovery itself is still IPv4.

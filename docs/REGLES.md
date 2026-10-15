@@ -28,7 +28,7 @@ supplémentaires, **sans toucher au code** : fichier `~/.config/Panther/rules.js
 | Champ | Rôle |
 |---|---|
 | `name` | nom de la règle (obligatoire, sert aussi à la retrouver et à la remplacer) |
-| `type` | `desktop`, `laptop`, `phone`, `tablet`, `tv`, `printer`, `router`, `switch`, `camera`, `server`, `nas`, `console`, `speaker`, `iot`, `unknown` |
+| `type` | `desktop`, `laptop`, `phone`, `tablet`, `tv`, `settop`, `printer`, `router`, `switch`, `camera`, `server`, `nas`, `console`, `speaker`, `iot`, `unknown` |
 | `points` | 1 à 100 (50 par défaut) : s'ajoutent aux indices intégrés, qui gardent leur rôle |
 | `force` | `true` : impose le type (confiance 100 %), quels que soient les autres indices |
 | `reason` | texte affiché dans les indices de l'appareil (par défaut : « règle « nom » ») |

@@ -28,7 +28,7 @@ detection rule…*).
 | Field | Role |
 |---|---|
 | `name` | rule name (required; also used to find and replace it) |
-| `type` | `desktop`, `laptop`, `phone`, `tablet`, `tv`, `printer`, `router`, `switch`, `camera`, `server`, `nas`, `console`, `speaker`, `iot`, `unknown` |
+| `type` | `desktop`, `laptop`, `phone`, `tablet`, `tv`, `settop`, `printer`, `router`, `switch`, `camera`, `server`, `nas`, `console`, `speaker`, `iot`, `unknown` |
 | `points` | 1 to 100 (50 by default): added to the built-in clues, which keep their role |
 | `force` | `true`: imposes the type (100 % confidence), whatever the other clues say |
 | `reason` | text shown in the device's clues (default: “rule “name””) |

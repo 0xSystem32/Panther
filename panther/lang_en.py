@@ -1701,4 +1701,10 @@ EN = {
         "Security analysis",
     "Panther – scanner et cartographie de réseau local.\n\nMoteur de scan maison (TCP, ARP, NetBIOS, mDNS), sans dépendance externe.\nÀ n'utiliser que sur des réseaux dont vous avez l'autorisation.":
         "Panther – local network scanner and mapper.\n\nIn-house scan engine (TCP, ARP, NetBIOS, mDNS), no external dependency.\nOnly use it on networks you are authorised to scan.",
+    "Décodeur TV":
+        "Set-top box",
+    "Ajouter automatiquement les réseaux auxquels cette machine est déjà reliée (autres interfaces, routes, VLAN)":
+        "Automatically add the networks this machine is already connected to (other interfaces, routes, VLANs)",
+    "Rien n'est sondé pour les trouver : Panther lit les interfaces et les routes du système. Les interfaces virtuelles (Docker, machines virtuelles) sont ignorées.":
+        "Nothing is probed to find them: Panther reads the system's interfaces and routes. Virtual interfaces (Docker, virtual machines) are ignored.",
 }

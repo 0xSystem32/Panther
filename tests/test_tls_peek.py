@@ -116,7 +116,7 @@ class SetTopBoxClassificationTests(unittest.TestCase):
         dev = {"ip": "192.168.1.12", "ports": [8080, 8443], "vendor": "Sagemcom", "hostname": "", "mdns_services": [], "banners": {}, "os": "",
                "cert": {"cn": "AABBCC-stbste-12345678", "o": "Orange", "indicators": "Orange AABBCC-stbste-12345678"}}
         kind, conf, why = fingerprint.classify_detail(dev)
-        self.assertEqual(kind, "tv")
+        self.assertEqual(kind, "settop")
         self.assertTrue(any("stb" in r for r in why))
 
 

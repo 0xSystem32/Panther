@@ -139,8 +139,9 @@ class ScanMixin:
             aliases = history.alias_map()
         except (sqlite3.Error, OSError):
             aliases = {}
-        if self.scanner.start(self.targets, self.snmp, depth, self.security_on and not self.passive_on, self.iface_combo.currentData() or None, known, aliases):
+        if self.scanner.start(self.effective_targets(), self.snmp, depth, self.security_on and not self.passive_on, self.iface_combo.currentData() or None, known, aliases):
             self.t0, self.last_scan_auto, self.last_new = time.time(), auto, []
+            self.update_netlabel()  # le nombre de réseaux suit les routes du moment
             self.act_scan.setEnabled(False); self.act_stop.setEnabled(True)
             self.progress.setValue(0); self.progress.show(); self.timer.start(700)
 

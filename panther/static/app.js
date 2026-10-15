@@ -4,6 +4,7 @@ const ICONS = { // tracés 24x24
   phone:'<rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/>',
   printer:'<path d="M7 9V3h10v6M7 17H4v-7h16v7h-3"/><rect x="7" y="14" width="10" height="7"/>',
   router:'<rect x="3" y="14" width="18" height="6" rx="1.5"/><path d="M7 17h.01M11 17h.01M8 10a6 6 0 018 0M5.5 7.5a10 10 0 0113 0"/>',
+  settop:'<rect x="3" y="7" width="18" height="10" rx="1.5"/><path d="M7 10.5l3 1.5-3 1.5zM13 12h3M19 12h.01M7 17v2M17 17v2"/>',
   tv:'<rect x="3" y="5" width="18" height="12" rx="1.5"/><path d="M9 21l1-4M15 21l-1-4M10 8.5l4 2-4 2z"/>',
   tablet:'<rect x="5" y="2" width="14" height="20" rx="2"/><path d="M11 18h2"/>',
   console:'<rect x="2" y="7" width="20" height="10" rx="4"/><path d="M7 10v4M5 12h4M16 11h.01M18 13h.01"/>',

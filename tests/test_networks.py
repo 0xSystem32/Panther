@@ -160,3 +160,24 @@ class LocalNetworkTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AutoTargetsTests(unittest.TestCase):
+    KNOWN = [{"cidr": "192.168.1.0/24", "kind": "local", "iface": "eth0"},
+             {"cidr": "192.168.20.0/24", "kind": "routé", "iface": "eth0.20", "via": "192.168.1.254"},
+             {"cidr": "172.17.0.0/16", "kind": "interface", "iface": "docker0"},
+             {"cidr": "10.8.0.0/24", "kind": "interface", "iface": "wg0"},
+             {"cidr": "8.8.8.0/24", "kind": "routé", "iface": "eth0"},
+             {"cidr": "10.0.0.0/8", "kind": "routé", "iface": "eth0"},
+             {"cidr": "192.168.20.0/24", "kind": "interface", "iface": "eth1"},
+             {"cidr": "10.9.0.0/24", "kind": "routé", "via": "10.9.0.1"}]
+
+    def test_keeps_reachable_private_networks_and_drops_the_rest(self):
+        kinds = {"eth0": "ethernet", "eth0.20": "ethernet", "eth1": "ethernet", "docker0": "virtuel", "wg0": "vpn"}
+        out = networks.auto_targets("192.168.1.0/24", known=self.KNOWN, kind_of=lambda i: kinds[i])
+        self.assertEqual(out, ["192.168.20.0/24", "10.8.0.0/24", "10.9.0.0/24"])      # ni local, ni Docker, ni public, ni /8, sans doublon
+
+    def test_nothing_to_add_on_a_flat_home_network_and_a_cap(self):
+        self.assertEqual(networks.auto_targets("192.168.1.0/24", known=[self.KNOWN[0]]), [])
+        many = [{"cidr": f"10.{i}.0.0/24", "kind": "routé", "via": "10.0.0.1"} for i in range(1, 30)]
+        self.assertEqual(len(networks.auto_targets("192.168.1.0/24", known=many)), 8)

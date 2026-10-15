@@ -39,6 +39,8 @@ def draw_icon(p, kind, r, col, width=None):
     elif kind == "tv":
         R(-10, -8, 20, 13, 2); L(-6, 9, -4, 5); L(6, 9, 4, 5)
         p.drawPolyline([QPointF(-2.5 * u, -5 * u), QPointF(3 * u, -1.5 * u), QPointF(-2.5 * u, 2 * u), QPointF(-2.5 * u, -5 * u)])
+    elif kind == "settop":  # boîtier plat : lecture, voyant, pieds
+        R(-10, -5, 20, 11, 2); p.drawPolyline([QPointF(-6 * u, -1.5 * u), QPointF(-3 * u, 0.5 * u), QPointF(-6 * u, 2.5 * u), QPointF(-6 * u, -1.5 * u)]); L(0, 0.5, 4, 0.5); p.drawEllipse(QPointF(7 * u, 0.5 * u), 0.9 * u, 0.9 * u); L(-6, 6, -6, 8); L(6, 6, 6, 8)
     elif kind == "tablet":
         R(-8, -9, 16, 18, 2); L(-1.5, 6.5, 1.5, 6.5)
     elif kind == "console":

@@ -26,7 +26,7 @@ OUI = {
 # Table volontairement réduite : déposer la liste IEEE complète dans oui.txt
 # (format "AABBCC;Fabricant") pour une couverture totale.
 
-KINDS = ("desktop", "laptop", "phone", "tablet", "tv", "printer", "router", "switch", "camera", "server",
+KINDS = ("desktop", "laptop", "phone", "tablet", "tv", "settop", "printer", "router", "switch", "camera", "server",
          "nas", "console", "speaker", "iot", "unknown")
 PRINTER_VENDORS = {"Canon", "Brother", "Epson", "HP", "Xerox", "Lexmark", "Ricoh", "Kyocera"}
 MOBILE_VENDORS = {"Samsung", "Xiaomi", "Huawei", "OnePlus", "Oppo", "Google"}
@@ -164,7 +164,7 @@ MDNS_HINTS = {"_ipp._tcp": ("printer", 50), "_ipps._tcp": ("printer", 50), "_pri
 MODEL_PATTERNS = [
     (r"iphone", "phone", 70), (r"ipad|galaxy tab|kindle|tablet|surface go", "tablet", 70),
     (r"macbook", "laptop", 70), (r"imac|mac ?mini|mac ?pro|mac studio", "desktop", 70),
-    (r"apple ?tv|appletv", "tv", 70), (r"\bstb|set-?top|d[ée]codeur", "tv", 40), (r"homepod|audioaccessory", "speaker", 70),
+    (r"apple ?tv|appletv", "tv", 70), (r"\bstb|set-?top|d[ée]codeur|decoder", "settop", 60), (r"homepod|audioaccessory", "speaker", 70),
     (r"chromecast|google tv", "tv", 70), (r"nest (audio|mini|hub)|google home", "speaker", 65),
     (r"bravia|smart ?tv|webos|tizen|roku|fire ?tv|android ?tv|shield|tv\b|televis|vewd|hbbtv|netcast|vidaa|opera tv", "tv", 60),
     (r"playstation|ps[345]\b|xbox|nintendo", "console", 70),

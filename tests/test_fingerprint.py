@@ -1,3 +1,4 @@
+import importlib.util
 import struct
 import unittest
 
@@ -135,3 +136,29 @@ class VendorTests(unittest.TestCase):
                 "MA-L,001BA9,Brother industries, LTD.,Nagoya\n".replace("Brother industries, LTD.", '"Brother industries, LTD."')
                 + "MA-L,BADROW,Nope,x\nMA-L,3C0754,\"Apple, Inc.\",Cupertino\n")
         self.assertEqual(upd.convert(text), {"001BA9": "Brother", "3C0754": "Apple"})
+
+
+class SetTopBoxTests(unittest.TestCase):
+    base = {"ip": "192.168.1.12", "ports": [8080, 8443], "vendor": "Sagemcom", "hostname": "device-32", "mdns_services": [], "banners": {}, "os": ""}
+
+    def classify(self, **kw):
+        return fingerprint.classify_detail({**self.base, **kw})
+
+    def test_operator_decoder_is_a_set_top_box_not_a_tv(self):
+        for extra in ({"ssdp": {"model": "decodeur"}}, {"cert": {"indicators": "Orange AABBCC-stbste-12345678"}}, {"mdns_txt": {"model": "UHD-STB-4K"}}):
+            kind, conf, why = self.classify(**extra)
+            self.assertEqual(kind, "settop", extra)
+            self.assertGreaterEqual(conf, 15)
+
+    def test_a_real_tv_stays_a_tv(self):
+        self.assertEqual(self.classify(vendor="Vestel", hostname="salon-tv", ssdp={"model": "TV"}, ports=[8008, 8009])[0], "tv")
+
+    def test_new_type_is_known_by_the_engine_and_the_labels(self):
+        from panther import labels
+        self.assertIn("settop", fingerprint.KINDS)
+        self.assertEqual(labels.TYPE_LABELS["settop"], "Décodeur TV")
+
+    @unittest.skipUnless(importlib.util.find_spec("PyQt6"), "PyQt6 absent")
+    def test_new_type_has_a_colour_and_an_icon(self):
+        from panther.ui import theme
+        self.assertIn("settop", theme.TYPE_COLORS)

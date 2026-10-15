@@ -86,8 +86,20 @@ class PrefsMixin:
             self.rebuild()
         self.refresh_panel(); self.view.viewport().update()
 
+    def effective_targets(self):
+        """Plages à scanner en plus du réseau local : celles que vous avez ajoutées, plus (si l'option est active) les autres réseaux
+        auxquels cette machine est déjà reliée (autres interfaces, routes, VLAN)."""
+        extra = []
+        if self.auto_networks:
+            try:
+                local = (self.network or local_network())["cidr"]
+                extra = [c for c in networks.auto_targets(local) if c not in self.targets]
+            except (RuntimeError, OSError, KeyError):
+                extra = []
+        return list(self.targets) + extra
+
     def update_netlabel(self):
-        n = len(self.targets)
+        n = len(self.effective_targets())
         self.net_btn.setText(tr("Réseaux ({n})", n=n + 1) if n else tr("Réseaux…"))
         if self.network:
             vlan = f"  ·  VLAN {self.network['vlan']}" if self.network.get("vlan") else ""
@@ -141,11 +153,13 @@ class PrefsMixin:
             local = local_network()["cidr"]
         except (RuntimeError, OSError):
             local = None
-        dlg = NetworksDialog(local, self.targets, self.snmp, self)
+        dlg = NetworksDialog(local, self.targets, self.snmp, self, auto=self.auto_networks)
         if dlg.exec():
             previous = self.snmp
             self.targets, self.snmp = dlg.selected(), dlg.snmp_sources()
+            self.auto_networks = dlg.auto_enabled()
             self.settings.setValue("targets", json.dumps(self.targets))
+            self.settings.setValue("auto_networks", self.auto_networks)
             self.save_snmp(self.snmp, previous)
             self.update_netlabel()
             self.status.setText(tr("Plages mises à jour : relancez le scan pour les prendre en compte."))

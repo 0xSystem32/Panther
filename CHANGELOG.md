@@ -21,6 +21,8 @@ All notable changes are listed here. Format: [Keep a Changelog](https://keepacha
 
 - **Late additions**: latency curve per device, saved scan profiles, SNMP v3 (authNoPriv), TLS certificate read from servers that demand a client certificate (set-top boxes), animated final map layout, iPhone 16 models, IPv6 addresses per device.
 
+- Networks the machine is already connected to (other interfaces, routes, VLANs) are scanned automatically (option in *Networks*); new device type *Set-top box* (operator TV decoders no longer look like TVs).
+
 ### Changed
 - Scan discovery uses the kernel's ARP table: a normal scan goes from ~98 s to ~11 s on a small network; a presence scan takes ~2 s.
 - Device identity is the MAC address first (an IP change is an event, never a duplicate).

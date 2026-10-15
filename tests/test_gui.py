@@ -12,7 +12,7 @@ if HAS_QT:
     from PyQt6.QtCore import QPointF, QSettings, Qt
     from PyQt6.QtWidgets import QApplication, QLabel, QMenu, QTableWidget, QWidget
 
-    from panther import alerts, gui, history, ouiupdate, reportpdf, rules, schedule, secrets, security, store, wol
+    from panther import alerts, gui, history, networks, ouiupdate, reportpdf, rules, schedule, secrets, security, store, wol
     from panther.ui import dialogs, theme
 
 NET = "192.168.1.0/24"
@@ -54,6 +54,7 @@ class GuiTests(unittest.TestCase):
         for name in ("information", "warning", "critical"):
             setattr(gui.QMessageBox, name, staticmethod(lambda *a, _n=name, **k: self.boxes.append((_n, a[1:3])) or 0))
         gui.QMessageBox.question = staticmethod(lambda *a, **k: self.boxes.append(("question", a[1:3])) or gui.QMessageBox.StandardButton.Yes)
+        self._auto_targets, networks.auto_targets = networks.auto_targets, (lambda *a, **k: [])  # jamais les vrais réseaux de la machine de test
         self.w = gui.Main()
         self.w.notify = lambda *a: None
         self.w.animations = False  # déterministe : les tests d'animation l'activent eux-mêmes
@@ -62,6 +63,7 @@ class GuiTests(unittest.TestCase):
         self.w.show()
 
     def tearDown(self):
+        networks.auto_targets = self._auto_targets
         secrets._tool = self._secret_tool
         gui.set_text_scale(1.0)
         gui.T.update(gui.THEMES["dark"])
@@ -908,6 +910,33 @@ class GuiTests(unittest.TestCase):
         v.resize(120, 20); self.app.processEvents()
         self.assertGreater(v.height(), wide)
         self.assertFalse(WrappedValue.needed("192.168.1.1 · gateway 192.168.1.254")); self.assertTrue(WrappedValue.needed("x" * 30))
+
+    # --- réseaux ajoutés automatiquement (VLAN, autres interfaces)
+    def test_known_networks_are_scanned_automatically_and_can_be_turned_off(self):
+        networks.auto_targets = lambda local, *a, **k: ["192.168.20.0/24", "10.5.0.0/24"]
+        self.w.targets = ["10.5.0.0/24"]                                                        # déjà saisie à la main : pas de doublon
+        self.assertEqual(self.w.effective_targets(), ["10.5.0.0/24", "192.168.20.0/24"])
+        calls = []
+        self.w.scanner.start = lambda *a, **k: calls.append(a) or True
+        self.w.start_scan()
+        self.assertEqual(calls[0][0], ["10.5.0.0/24", "192.168.20.0/24"])
+        self.assertIn("(3)", self.w.net_btn.text())                                             # local + 2
+        self.w.auto_networks = False
+        self.assertEqual(self.w.effective_targets(), ["10.5.0.0/24"])
+
+    def test_networks_dialog_exposes_the_automatic_option_and_saves_it(self):
+        dlg = gui.NetworksDialog("192.168.1.0/24", [], [], self.w, auto=True)
+        self.assertTrue(dlg.auto_enabled())
+        dlg.auto.setChecked(False)
+        old = gui.NetworksDialog.exec
+        gui.NetworksDialog.exec = lambda self_: True
+        try:
+            self.w.auto_networks = True
+            self.w.open_networks()
+        finally:
+            gui.NetworksDialog.exec = old
+        self.assertTrue(self.w.auto_networks)                                                   # le dialogue neuf est coché par défaut
+        self.assertEqual(str(self.w.settings.value("auto_networks")).lower(), "true")
 
     # --- anglais
     FRENCH = __import__("re").compile(r"[àâçéèêëîïôùûüœ]|\b(appareils?|réseaux?|lancez|aucun[e]?|erreur|impossible|enregistr\w+|choisissez|dossier|fichier|"

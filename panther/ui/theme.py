@@ -70,7 +70,7 @@ def resolve_theme(mode):
 T = dict(THEMES["dark"])
 
 
-TYPE_COLORS = {"router": "#7ea2cf", "printer": "#c4a574", "phone": "#a591c0", "tablet": "#a591c0", "console": "#b59a6d", "speaker": "#8fb3b8", "tv": "#c28d98",
+TYPE_COLORS = {"router": "#7ea2cf", "printer": "#c4a574", "phone": "#a591c0", "tablet": "#a591c0", "console": "#b59a6d", "speaker": "#8fb3b8", "tv": "#c28d98", "settop": "#c79b8b",
                "camera": "#c08585", "server": "#7db5a0", "nas": "#7db5a0", "iot": "#c4b985",
                "desktop": "#92aed0", "laptop": "#92aed0", "switch": "#7ea2cf", "internet": "#8b909a", "net": "#8b909a",
                "hop": "#7ea2cf", "gap": "#8b909a", "unknown": "#8b909a"}

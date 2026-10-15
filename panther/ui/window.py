@@ -79,6 +79,7 @@ class Main(QMainWindow, ScanMixin, MapMixin, TablesMixin, PanelMixin, DevicesMix
         self.layout_mode = self.settings.value("layout", "etoile") if self.settings.value("layout", "etoile") in ("etoile", "hierarchique", "types") else "etoile"
         self.show_offline = str(self.settings.value("show_offline", True)).lower() in ("true", "1")
         self.animations = str(self.settings.value("animations", True)).lower() in ("true", "1")
+        self.auto_networks = str(self.settings.value("auto_networks", True)).lower() in ("true", "1")
         mode = str(self.settings.value("theme", "dark"))
         self.theme_mode = mode if mode in THEME_MODES else "auto"
         size = str(self.settings.value("text_size", "normal"))

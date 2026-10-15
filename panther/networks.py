@@ -116,6 +116,27 @@ def known_networks(local_cidr=None):
     return nets
 
 
+def auto_targets(local_cidr, known=None, kind_of=None):
+    """Autres réseaux auxquels cette machine est DÉJÀ reliée (autres interfaces, routes vers des VLAN), prêts à être scannés d'office.
+    Sans sondage : on ne lit que ce que le système connaît. Les interfaces virtuelles (Docker, machines virtuelles) et les plages
+    refusées (publiques, trop grandes) sont écartées sans bruit."""
+    kind_of = kind_of or link_kind
+    nets = known if known is not None else known_networks(local_cidr)
+    out = []
+    for n in nets:
+        if n.get("kind") == "local" or n["cidr"] == local_cidr:
+            continue
+        if n.get("iface") and kind_of(n["iface"]) == "virtuel":
+            continue
+        try:
+            c = str(validate_cidr(n["cidr"]))
+        except ValueError:
+            continue
+        if c not in out:
+            out.append(c)
+    return out[:8]
+
+
 def describe(net):
     """Libellé lisible : '192.168.20.0/24 · VLAN 20 · via 192.168.1.254'."""
     parts = [net["cidr"]]

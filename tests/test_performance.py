@@ -105,6 +105,8 @@ class UiSpeedTests(unittest.TestCase):
         store.PATH = os.path.join(self.tmp.name, "d.json")
         QSettings.setPath(QSettings.Format.NativeFormat, QSettings.Scope.UserScope, self.tmp.name)
         theme.T.update(theme.THEMES["dark"])
+        from panther import networks
+        self._auto, networks.auto_targets = networks.auto_targets, (lambda *a, **k: [])
         self.w = window.Main()
         self.w.notify = lambda *a: None
         self.w.network = {"iface": "eth0", "cidr": NET, "gateway": "10.0.0.1", "vlan": None, "kind": "ethernet"}
@@ -112,6 +114,8 @@ class UiSpeedTests(unittest.TestCase):
         self.w.show()
 
     def tearDown(self):
+        from panther import networks
+        networks.auto_targets = self._auto
         self.w.close()
         self.tmp.cleanup()
 

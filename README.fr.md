@@ -24,7 +24,7 @@ compare deux scans et exporte des rapports PDF. Le moteur de scan est **écrit �
   Une **mini-carte** apparaît quand on zoome (clic ou glisser pour se déplacer), **Maj + glisser** sélectionne plusieurs
   appareils (ou **Ctrl + clic**) et la sélection peut être marquée de confiance ou étiquetée d'un coup ; *Affichage →
   Centrer sur la sélection* (`Ctrl+Maj+0`) retrouve un appareil.
-- **Plusieurs réseaux et VLAN** : plages saisies à la main ou détectées (routes, interfaces 802.1Q, passerelles),
+- **Plusieurs réseaux et VLAN** : les réseaux auxquels cette machine est déjà reliée (autres interfaces, routes, VLAN) sont scannés d'office ; plages saisies à la main ou détectées (routes, interfaces 802.1Q, passerelles),
   chemin traceroute, avertissement si un réseau ne répond pas, **SNMP** en lecture seule (adresses MAC et ports de
   switch d'autres VLAN), voisins **LLDP/CDP**.
 - **IPv6 (adresses)** : les adresses IPv6 de chaque appareil (lues dans la table des voisins du noyau après un ping multicast) sont affichées dans le panneau et exportées ; la découverte reste en IPv4.
