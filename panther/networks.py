@@ -8,6 +8,7 @@ import re
 import socket
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
+from .i18n import N_, TrDict, tr
 
 MAX_HOSTS = 4096  # /20
 
@@ -25,14 +26,13 @@ def validate_cidr(text):
     try:
         net = ipaddress.ip_network(text, strict=False)
     except ValueError:
-        raise ValueError(f"« {text} » n'est pas une plage valide (exemple : 192.168.20.0/24).") from None
+        raise ValueError(tr("« {text} » n'est pas une plage valide (exemple : 192.168.20.0/24).", text=text)) from None
     if net.version != 4:
-        raise ValueError("Seul l'IPv4 est géré pour le moment.")
+        raise ValueError(tr("Seul l'IPv4 est géré pour le moment."))
     if not net.is_private or net.is_loopback and net.prefixlen < 24:
-        raise ValueError("Plage publique refusée : Panther ne scanne que des réseaux privés "
-                         "(10.x, 172.16-31.x, 192.168.x).")
+        raise ValueError(tr("Plage publique refusée : Panther ne scanne que des réseaux privés (10.x, 172.16-31.x, 192.168.x)."))
     if net.num_addresses > MAX_HOSTS:
-        raise ValueError(f"Plage trop grande ({net.num_addresses} adresses, maximum {MAX_HOSTS} : /20).")
+        raise ValueError(tr("Plage trop grande ({num_addresses} adresses, maximum {max_hosts} : /20).", num_addresses=net.num_addresses, max_hosts=MAX_HOSTS))
     return net
 
 
@@ -47,7 +47,7 @@ def vlan_ids():
     return out
 
 
-LINK_LABELS = {"wifi": "Wi-Fi", "ethernet": "Ethernet", "vpn": "VPN", "virtuel": "virtuelle"}
+LINK_LABELS = TrDict({"wifi": "Wi-Fi", "ethernet": "Ethernet", "vpn": "VPN", "virtuel": N_("virtuelle")})
 
 
 def link_kind(iface, sysfs="/sys/class/net"):
@@ -123,9 +123,9 @@ def describe(net):
     if net.get("via"):
         parts.append(f"via {net['via']}")
     if net.get("hops") == 0:
-        parts.append("interface de votre routeur")
+        parts.append(tr("interface de votre routeur"))
     elif net.get("hops"):
-        parts.append(f"~{net['hops']} saut(s)")
+        parts.append(tr("~{hops} saut(s)", hops=net['hops']))
     return "  ·  ".join(parts)
 
 

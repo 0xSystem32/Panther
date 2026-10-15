@@ -11,10 +11,12 @@ import re
 import socket
 import time
 
+from .i18n import N_, TrDict, tr
+
 log = logging.getLogger("panther.security")
 SEVERITIES = ("info", "faible", "moyen", "élevé", "critique")
 RANK = {s: i for i, s in enumerate(SEVERITIES)}
-LABELS = {"critique": "Critique", "élevé": "Élevé", "moyen": "Moyen", "faible": "Faible", "info": "Info"}
+LABELS = TrDict({"critique": N_("Critique"), "élevé": N_("Élevé"), "moyen": N_("Moyen"), "faible": N_("Faible"), "info": N_("Info")})
 # Ports ajoutés au scan quand l'analyse est activée (sur les ports déjà scannés, rien n'est dupliqué).
 EXTRA_PORTS = (111, 1433, 1883, 2049, 2323, 2375, 5900, 5984, 7547, 8554, 9200, 11211, 27017, 34567, 37777)
 ADMIN_TYPES = {"router", "switch", "camera", "nas", "printer", "iot"}
@@ -27,55 +29,55 @@ def finding(fid, severity, title, detail="", remedy="", port=None):
 
 # id, gravité, titre, détail, recommandation
 PORT_RULES = {
-    23: ("telnet", "élevé", "Telnet activé", "Le mot de passe et les commandes circulent en clair sur le réseau.",
-         "Désactiver Telnet et utiliser SSH."),
-    2323: ("telnet", "élevé", "Telnet activé (port 2323)", "Le mot de passe et les commandes circulent en clair.",
-           "Désactiver Telnet et utiliser SSH."),
-    21: ("ftp", "moyen", "FTP activé", "Identifiants et fichiers transmis en clair.", "Utiliser SFTP ou FTPS."),
-    3389: ("rdp", "élevé", "Bureau à distance (RDP) accessible", "Cible fréquente d'attaques par mots de passe.",
-           "Activer l'authentification NLA, limiter l'accès (VPN, pare-feu) ou désactiver."),
-    5900: ("vnc", "élevé", "VNC accessible", "Prise de contrôle à distance souvent protégée par un mot de passe faible.",
-           "Passer par un tunnel SSH/VPN ou désactiver."),
-    5555: ("adb", "élevé", "Débogage Android (ADB) ouvert", "Permet de contrôler l'appareil depuis le réseau.",
-           "Désactiver le débogage réseau dans les options développeur."),
-    111: ("rpc", "moyen", "RPC/portmap accessible", "Service d'administration réseau rarement nécessaire.", "Filtrer ou désactiver."),
-    2049: ("nfs", "moyen", "Partage NFS accessible", "Selon la configuration, accessible sans authentification.",
-           "Restreindre les clients autorisés."),
-    3306: ("mysql", "moyen", "Base MySQL accessible depuis le réseau", "", "Limiter à localhost ou à des machines précises."),
-    5432: ("postgres", "moyen", "Base PostgreSQL accessible depuis le réseau", "", "Limiter à localhost ou à des machines précises."),
-    1433: ("mssql", "moyen", "Base SQL Server accessible depuis le réseau", "", "Limiter à des machines précises."),
-    27017: ("mongodb", "élevé", "MongoDB accessible depuis le réseau", "Historiquement souvent ouvert sans authentification.",
-            "Activer l'authentification et limiter l'accès."),
-    6379: ("redis", "moyen", "Redis accessible depuis le réseau", "", "Définir un mot de passe et limiter l'accès."),
-    11211: ("memcached", "élevé", "Memcached accessible", "Données lisibles et service utilisable pour des attaques par amplification.",
-            "Limiter à localhost."),
-    9200: ("elasticsearch", "élevé", "Elasticsearch accessible", "", "Activer l'authentification et limiter l'accès."),
-    5984: ("couchdb", "moyen", "CouchDB accessible depuis le réseau", "", "Activer l'authentification."),
-    2375: ("docker", "critique", "API Docker non chiffrée (2375)", "Donne un contrôle total de la machine.",
-           "Désactiver l'API TCP ou la protéger par TLS."),
-    1883: ("mqtt", "faible", "MQTT non chiffré", "Messages domotiques lisibles sur le réseau.", "Utiliser MQTT sur TLS (8883)."),
-    37777: ("dvr", "moyen", "Port d'enregistreur vidéo (DVR/NVR)", "Ces interfaces sont fréquemment vulnérables.",
-            "Mettre à jour le firmware, isoler dans un VLAN."),
-    34567: ("dvr", "moyen", "Port d'enregistreur vidéo (DVR/NVR)", "Ces interfaces sont fréquemment vulnérables.",
-            "Mettre à jour le firmware, isoler dans un VLAN."),
-    554: ("rtsp", "faible", "Flux vidéo RTSP exposé", "Vérifier qu'il demande un mot de passe.", "Protéger le flux par identifiant."),
-    8554: ("rtsp", "faible", "Flux vidéo RTSP exposé", "Vérifier qu'il demande un mot de passe.", "Protéger le flux par identifiant."),
+    23: ("telnet", "élevé", N_("Telnet activé"), N_("Le mot de passe et les commandes circulent en clair sur le réseau."),
+         N_("Désactiver Telnet et utiliser SSH.")),
+    2323: ("telnet", "élevé", N_("Telnet activé (port 2323)"), N_("Le mot de passe et les commandes circulent en clair."),
+           N_("Désactiver Telnet et utiliser SSH.")),
+    21: ("ftp", "moyen", N_("FTP activé"), N_("Identifiants et fichiers transmis en clair."), N_("Utiliser SFTP ou FTPS.")),
+    3389: ("rdp", "élevé", N_("Bureau à distance (RDP) accessible"), N_("Cible fréquente d'attaques par mots de passe."),
+           N_("Activer l'authentification NLA, limiter l'accès (VPN, pare-feu) ou désactiver.")),
+    5900: ("vnc", "élevé", N_("VNC accessible"), N_("Prise de contrôle à distance souvent protégée par un mot de passe faible."),
+           N_("Passer par un tunnel SSH/VPN ou désactiver.")),
+    5555: ("adb", "élevé", N_("Débogage Android (ADB) ouvert"), N_("Permet de contrôler l'appareil depuis le réseau."),
+           N_("Désactiver le débogage réseau dans les options développeur.")),
+    111: ("rpc", "moyen", N_("RPC/portmap accessible"), N_("Service d'administration réseau rarement nécessaire."), N_("Filtrer ou désactiver.")),
+    2049: ("nfs", "moyen", N_("Partage NFS accessible"), N_("Selon la configuration, accessible sans authentification."),
+           N_("Restreindre les clients autorisés.")),
+    3306: ("mysql", "moyen", N_("Base MySQL accessible depuis le réseau"), "", N_("Limiter à localhost ou à des machines précises.")),
+    5432: ("postgres", "moyen", N_("Base PostgreSQL accessible depuis le réseau"), "", N_("Limiter à localhost ou à des machines précises.")),
+    1433: ("mssql", "moyen", N_("Base SQL Server accessible depuis le réseau"), "", N_("Limiter à des machines précises.")),
+    27017: ("mongodb", "élevé", N_("MongoDB accessible depuis le réseau"), N_("Historiquement souvent ouvert sans authentification."),
+            N_("Activer l'authentification et limiter l'accès.")),
+    6379: ("redis", "moyen", N_("Redis accessible depuis le réseau"), "", N_("Définir un mot de passe et limiter l'accès.")),
+    11211: ("memcached", "élevé", N_("Memcached accessible"), N_("Données lisibles et service utilisable pour des attaques par amplification."),
+            N_("Limiter à localhost.")),
+    9200: ("elasticsearch", "élevé", N_("Elasticsearch accessible"), "", N_("Activer l'authentification et limiter l'accès.")),
+    5984: ("couchdb", "moyen", N_("CouchDB accessible depuis le réseau"), "", N_("Activer l'authentification.")),
+    2375: ("docker", "critique", N_("API Docker non chiffrée (2375)"), N_("Donne un contrôle total de la machine."),
+           N_("Désactiver l'API TCP ou la protéger par TLS.")),
+    1883: ("mqtt", "faible", N_("MQTT non chiffré"), N_("Messages domotiques lisibles sur le réseau."), N_("Utiliser MQTT sur TLS (8883).")),
+    37777: ("dvr", "moyen", N_("Port d'enregistreur vidéo (DVR/NVR)"), N_("Ces interfaces sont fréquemment vulnérables."),
+            N_("Mettre à jour le firmware, isoler dans un VLAN.")),
+    34567: ("dvr", "moyen", N_("Port d'enregistreur vidéo (DVR/NVR)"), N_("Ces interfaces sont fréquemment vulnérables."),
+            N_("Mettre à jour le firmware, isoler dans un VLAN.")),
+    554: ("rtsp", "faible", N_("Flux vidéo RTSP exposé"), N_("Vérifier qu'il demande un mot de passe."), N_("Protéger le flux par identifiant.")),
+    8554: ("rtsp", "faible", N_("Flux vidéo RTSP exposé"), N_("Vérifier qu'il demande un mot de passe."), N_("Protéger le flux par identifiant.")),
 }
 
 # Motifs de bannière : (regex, id, gravité, titre, détail, recommandation)
 BANNER_RULES = [
-    (r"SSH-1\.(0|3|5)\b", "ssh1", "élevé", "SSH protocole 1", "Protocole obsolète et cassé.", "Passer au protocole 2."),
-    (r"vsFTPd 2\.3\.4", "vsftpd-backdoor", "critique", "vsFTPd 2.3.4",
-     "Version distribuée en 2011 avec une porte dérobée connue.", "Mettre à jour immédiatement."),
-    (r"ProFTPD 1\.3\.3c", "proftpd-backdoor", "critique", "ProFTPD 1.3.3c",
-     "Version distribuée en 2010 avec une porte dérobée connue.", "Mettre à jour immédiatement."),
-    (r"Apache/(1\.|2\.[0-2]\b)", "apache-old", "moyen", "Serveur Apache ancien (fin de support)", "",
-     "Mettre à jour vers une version maintenue."),
-    (r"Microsoft-IIS/([1-7])\.", "iis-old", "moyen", "IIS obsolète", "Version sans support de sécurité.", "Mettre à jour Windows/IIS."),
-    (r"Boa/0\.9", "boa", "moyen", "Serveur web Boa (abandonné depuis 2005)",
-     "Très répandu dans les caméras et routeurs bas de gamme, sans correctifs.", "Mettre à jour le firmware ou remplacer l'appareil."),
-    (r"nginx/(0\.|1\.[0-9]\.|1\.1[0-5]\.)", "nginx-old", "faible", "nginx ancien (< 1.16)", "", "Mettre à jour."),
-    (r"lighttpd/1\.4\.[0-3]\d\b", "lighttpd-old", "faible", "lighttpd ancien", "", "Mettre à jour."),
+    (r"SSH-1\.(0|3|5)\b", "ssh1", "élevé", N_("SSH protocole 1"), N_("Protocole obsolète et cassé."), N_("Passer au protocole 2.")),
+    (r"vsFTPd 2\.3\.4", "vsftpd-backdoor", "critique", N_("vsFTPd 2.3.4"),
+     N_("Version distribuée en 2011 avec une porte dérobée connue."), N_("Mettre à jour immédiatement.")),
+    (r"ProFTPD 1\.3\.3c", "proftpd-backdoor", "critique", N_("ProFTPD 1.3.3c"),
+     N_("Version distribuée en 2010 avec une porte dérobée connue."), N_("Mettre à jour immédiatement.")),
+    (r"Apache/(1\.|2\.[0-2]\b)", "apache-old", "moyen", N_("Serveur Apache ancien (fin de support)"), "",
+     N_("Mettre à jour vers une version maintenue.")),
+    (r"Microsoft-IIS/([1-7])\.", "iis-old", "moyen", N_("IIS obsolète"), N_("Version sans support de sécurité."), N_("Mettre à jour Windows/IIS.")),
+    (r"Boa/0\.9", "boa", "moyen", N_("Serveur web Boa (abandonné depuis 2005)"),
+     N_("Très répandu dans les caméras et routeurs bas de gamme, sans correctifs."), N_("Mettre à jour le firmware ou remplacer l'appareil.")),
+    (r"nginx/(0\.|1\.[0-9]\.|1\.1[0-5]\.)", "nginx-old", "faible", N_("nginx ancien (< 1.16)"), "", N_("Mettre à jour.")),
+    (r"lighttpd/1\.4\.[0-3]\d\b", "lighttpd-old", "faible", N_("lighttpd ancien"), "", N_("Mettre à jour.")),
 ]
 
 
@@ -90,23 +92,23 @@ def banner_findings(dev):
         for rx, fid, sev, title, detail, remedy in BANNER_RULES:
             if re.search(rx, banner) and fid not in seen:
                 seen.add(fid)
-                out.append(finding(fid, sev, title, detail or f"Annonce : {banner[:60]}", remedy, int(port)))
+                out.append(finding(fid, sev, title, detail or tr("Annonce : {banner}", banner=banner[:60]), remedy, int(port)))
         v = _version(banner, r"OpenSSH_(\d+)\.(\d+)")
         if v and v < (7, 4) and "openssh-old" not in seen:
             seen.add("openssh-old")
-            out.append(finding("openssh-old", "faible", f"OpenSSH {v[0]}.{v[1]} annoncé (ancien)",
-                               "Sur Linux, les correctifs peuvent être rétroportés : la version affichée ne prouve pas la faille.",
-                               "Vérifier que le système est à jour.", int(port)))
+            out.append(finding("openssh-old", "faible", tr("OpenSSH {major}.{minor} annoncé (ancien)", major=v[0], minor=v[1]),
+                               N_("Sur Linux, les correctifs peuvent être rétroportés : la version affichée ne prouve pas la faille."),
+                               N_("Vérifier que le système est à jour."), int(port)))
     cert = dev.get("cert") or {}
     if cert.get("expired"):
-        out.append(finding("tls-expired", "faible", "Certificat HTTPS expiré", f"Expiré le {cert.get('not_after', '?')} : les navigateurs affichent un avertissement.",
-                           "Renouveler le certificat de l'appareil (ou le désactiver s'il n'est plus utilisé)."))
+        out.append(finding("tls-expired", "faible", N_("Certificat HTTPS expiré"), tr("Expiré le {not_after} : les navigateurs affichent un avertissement.", not_after=cert.get('not_after', '?')),
+                           N_("Renouveler le certificat de l'appareil (ou le désactiver s'il n'est plus utilisé).")))
     server = (dev.get("ssdp") or {}).get("server", "")
     v = _version(server, r"Portable SDK for UPnP devices/(\d+)\.(\d+)\.(\d+)")
     if v and v < (1, 6, 18):
-        out.append(finding("libupnp-old", "moyen", f"Pile UPnP ancienne (libupnp {'.'.join(map(str, v))})",
-                           "Les versions antérieures à 1.6.18 ont des failles connues (CVE-2012-5958 et suivantes).",
-                           "Mettre à jour le firmware ou désactiver UPnP."))
+        out.append(finding("libupnp-old", "moyen", tr("Pile UPnP ancienne (libupnp {version})", version='.'.join(map(str, v))),
+                           N_("Les versions antérieures à 1.6.18 ont des failles connues (CVE-2012-5958 et suivantes)."),
+                           N_("Mettre à jour le firmware ou désactiver UPnP.")))
     return out
 
 
@@ -180,19 +182,19 @@ def active_probes(ip, ports):
 
 
 OPEN_PROBE = {
-    6379: finding("redis-open", "critique", "Redis accessible sans mot de passe",
-                  "N'importe qui sur le réseau peut lire et modifier les données (et parfois exécuter du code).",
-                  "Définir `requirepass` et limiter l'écoute à localhost.", 6379),
-    11211: finding("memcached-open", "élevé", "Memcached répond sans authentification",
-                   "Données lisibles et service exploitable pour des attaques par amplification.", "Limiter l'écoute à localhost.", 11211),
-    9200: finding("elasticsearch-open", "critique", "Elasticsearch répond sans authentification",
-                  "Toutes les données indexées sont lisibles.", "Activer l'authentification et limiter l'accès.", 9200),
-    2375: finding("docker-open", "critique", "API Docker ouverte sans authentification",
-                  "Contrôle total de la machine hôte.", "Désactiver l'API TCP ou la protéger par TLS.", 2375),
+    6379: finding("redis-open", "critique", N_("Redis accessible sans mot de passe"),
+                  N_("N'importe qui sur le réseau peut lire et modifier les données (et parfois exécuter du code)."),
+                  N_("Définir `requirepass` et limiter l'écoute à localhost."), 6379),
+    11211: finding("memcached-open", "élevé", N_("Memcached répond sans authentification"),
+                   N_("Données lisibles et service exploitable pour des attaques par amplification."), N_("Limiter l'écoute à localhost."), 11211),
+    9200: finding("elasticsearch-open", "critique", N_("Elasticsearch répond sans authentification"),
+                  N_("Toutes les données indexées sont lisibles."), N_("Activer l'authentification et limiter l'accès."), 9200),
+    2375: finding("docker-open", "critique", N_("API Docker ouverte sans authentification"),
+                  N_("Contrôle total de la machine hôte."), N_("Désactiver l'API TCP ou la protéger par TLS."), 2375),
 }
 for _p in (554, 8554):
-    OPEN_PROBE[_p] = finding("rtsp-open", "élevé", "Flux caméra accessible sans mot de passe",
-                             "Le flux vidéo peut être regardé par n'importe qui sur le réseau.", "Activer l'authentification du flux.", _p)
+    OPEN_PROBE[_p] = finding("rtsp-open", "élevé", N_("Flux caméra accessible sans mot de passe"),
+                             N_("Le flux vidéo peut être regardé par n'importe qui sur le réseau."), N_("Activer l'authentification du flux."), _p)
 
 OPEN_PROBE_BY_ID = {f['id']: f['title'] for f in OPEN_PROBE.values()}
 
@@ -204,7 +206,7 @@ def analyze(dev, probes=None):
     def add(f):
         if f["id"] not in ids:
             ids.add(f["id"])
-            out.append(f)
+            out.append(dict(f, title=tr(f["title"]), detail=tr(f["detail"]) if f["detail"] else "", remedy=tr(f["remedy"]) if f["remedy"] else ""))
     for port in dev.get("ports", []):
         res = probes.get(port)
         if res == "open" and port in OPEN_PROBE:
@@ -214,36 +216,36 @@ def analyze(dev, probes=None):
         if rule:
             fid, sev, title, detail, remedy = rule
             if res == "protected":  # le service demande une authentification : exposition réduite
-                sev, detail = "faible", "Le service demande une authentification."
+                sev, detail = "faible", N_("Le service demande une authentification.")
             add(finding(fid, sev, title, detail, remedy, port))
     ports, typ = set(dev.get("ports", [])), dev.get("type", "unknown")
     if 445 in ports and typ not in ("desktop", "laptop", "nas", "server", "unknown"):
-        add(finding("smb-device", "moyen", f"Partage SMB sur un appareil de type « {typ} »",
-                    "Un partage Windows n'est pas attendu ici (surface d'attaque inutile).", "Désactiver SMB si inutile.", 445))
+        add(finding("smb-device", "moyen", tr("Partage SMB sur un appareil de type « {typ} »", typ=typ),
+                    N_("Un partage Windows n'est pas attendu ici (surface d'attaque inutile)."), N_("Désactiver SMB si inutile."), 445))
     if typ in ADMIN_TYPES and ports & PLAIN_HTTP and 443 not in ports and 8443 not in ports:
-        add(finding("http-admin", "faible", "Interface d'administration en HTTP non chiffré",
-                    "Le mot de passe d'administration circule en clair sur le réseau.", "Activer HTTPS si l'appareil le permet."))
+        add(finding("http-admin", "faible", N_("Interface d'administration en HTTP non chiffré"),
+                    N_("Le mot de passe d'administration circule en clair sur le réseau."), N_("Activer HTTPS si l'appareil le permet.")))
     for f in banner_findings(dev):
         add(f)
     out.sort(key=lambda f: (-RANK[f["severity"]], f["title"]))
     return out
 
 
-_STATIC_TITLES = {"smb-device": "Partage SMB inattendu", "http-admin": "Administration en HTTP", "libupnp-old": "Pile UPnP ancienne",
-                  "openssh-old": "OpenSSH ancien", "tls-expired": "Certificat HTTPS expiré"}
+_STATIC_TITLES = {"smb-device": N_("Partage SMB inattendu"), "http-admin": N_("Administration en HTTP"), "libupnp-old": N_("Pile UPnP ancienne"),
+                  "openssh-old": N_("OpenSSH ancien"), "tls-expired": N_("Certificat HTTPS expiré")}
 
 
 def title_of(rule_id):
     """Libellé lisible d'une règle à partir de son identifiant (« rtsp-open » -> « Flux caméra accessible sans mot de passe »)."""
     for fid, _sev, title, *_ in PORT_RULES.values():
         if fid == rule_id:
-            return title
+            return tr(title)
     if rule_id in OPEN_PROBE_BY_ID:
-        return OPEN_PROBE_BY_ID[rule_id]
+        return tr(OPEN_PROBE_BY_ID[rule_id])
     for _rx, fid, _sev, title, *_ in BANNER_RULES:
         if fid == rule_id:
-            return title
-    return _STATIC_TITLES.get(rule_id, rule_id)
+            return tr(title)
+    return tr(_STATIC_TITLES.get(rule_id, rule_id))
 
 
 def worst(findings):
@@ -265,24 +267,24 @@ def report_markdown(devices, networks=(), when=None):
     analysed = [d for d in devices if d.get("security") is not None and d.get("online", True)]
     exposed = sorted((d for d in analysed if d["security"]), key=lambda d: (-RANK[worst(d["security"])], d.get("hostname") or d["ip"]))
     c = count_by_severity(analysed)
-    lines = ["# Rapport d'exposition – Panther", "",
-             f"Généré le {time.strftime('%d/%m/%Y à %H:%M', when)}"
-             + (f" · réseaux analysés : {', '.join(networks)}" if networks else ""), "",
-             "Analyse en lecture seule : ports ouverts, bannières et réponses sans identifiant. "
-             "Aucun mot de passe n'a été essayé, aucune faille exploitée.", "",
-             "## Résumé", "",
-             f"- {len(analysed)} appareil(s) analysé(s), {len(exposed)} avec au moins un constat",
-             "- " + " · ".join(f"{LABELS[s]} : {n}" for s, n in c.items() if n) if any(c.values()) else "- Aucun constat", ""]
+    stamp = time.strftime(tr("%d/%m/%Y à %H:%M"), when)
+    lines = [tr("# Rapport d'exposition – Panther"), "",
+             tr("Généré le {stamp}", stamp=stamp) + (tr(" · réseaux analysés : {networks}", networks=", ".join(networks)) if networks else ""), "",
+             tr("Analyse en lecture seule : ports ouverts, bannières et réponses sans identifiant. "
+                "Aucun mot de passe n'a été essayé, aucune faille exploitée."), "",
+             tr("## Résumé"), "",
+             tr("- {analysed} appareil(s) analysé(s), {exposed} avec au moins un constat", analysed=len(analysed), exposed=len(exposed)),
+             "- " + " · ".join(f"{LABELS[s]} : {n}" for s, n in c.items() if n) if any(c.values()) else tr("- Aucun constat"), ""]
     if exposed:
-        lines += ["## Constats par appareil", ""]
+        lines += [tr("## Constats par appareil"), ""]
     for d in exposed:
         lines += [f"### {d.get('hostname') or d['ip']} ({d['ip']})", "",
-                  f"Type : {d.get('type', 'inconnu')} · gravité maximale : {LABELS[worst(d['security'])]}", ""]
+                  tr("Type : {type} · gravité maximale : {severity}", type=d.get("type", tr("inconnu")), severity=LABELS[worst(d["security"])]), ""]
         for f in d["security"]:
-            lines.append(f"- **{LABELS[f['severity']]}** – {f['title']}" + (f" (port {f['port']})" if f.get("port") else ""))
+            lines.append(f"- **{LABELS[f['severity']]}** – {f['title']}" + (tr(" (port {port})", port=f["port"]) if f.get("port") else ""))
             if f["detail"]:
                 lines.append(f"  - {f['detail']}")
             if f["remedy"]:
-                lines.append(f"  - À faire : {f['remedy']}")
+                lines.append(tr("  - À faire : {remedy}", remedy=f["remedy"]))
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"

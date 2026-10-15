@@ -1,6 +1,8 @@
 """Identification des appareils : fabricant (OUI), type, OS."""
 import re
 
+from .i18n import N_, tr
+
 # Mini table OUI (préfixe 3 octets -> fabricant). Extensible via oui.txt ("AABBCC;Fabricant").
 OUI = {
     "B827EB": "Raspberry Pi", "DCA632": "Raspberry Pi", "E45F01": "Raspberry Pi",
@@ -77,6 +79,14 @@ def shorten_vendor(name):
     return _TAIL_RE.sub("", name).strip(" ,.") or name
 
 
+def load_all_oui(package_dir):
+    """Base livrée avec Panther, puis celle de l'utilisateur (`~/.config/Panther/oui.txt`) qui la complète et la corrige."""
+    import os
+    from . import ouiupdate
+    load_extra_oui(os.path.join(package_dir, "oui.txt"))
+    load_extra_oui(ouiupdate.USER_PATH)
+
+
 def vendor_of(mac):
     if not mac:
         return ""
@@ -118,26 +128,26 @@ def guess_os(ttl, ports, vendor, hostname, banners, model=""):
     if 5555 in ports or "android" in h or vendor in {"Samsung", "Xiaomi", "Huawei"}:
         return "Android"
     if 9100 in ports or 631 in ports:
-        return "Firmware imprimante"
+        return tr("Firmware imprimante")
     if ttl:
         if ttl > 128:
-            return "Équipement réseau (Cisco/embarqué)"
+            return tr("Équipement réseau (Cisco/embarqué)")
         if ttl > 64:
             return "Windows"
         return "Linux / Unix"
-    return "Inconnu"
+    return tr("Inconnu")
 
 
 # --- classification par score ------------------------------------------------------
-PORT_HINTS = {9100: ("printer", 40, "port d'impression 9100"), 631: ("printer", 40, "port d'impression IPP 631"),
-              515: ("printer", 30, "port d'impression LPD 515"), 554: ("camera", 30, "flux vidéo RTSP (554)"),
-              8009: ("tv", 30, "port Google Cast (8009)"), 8008: ("tv", 20, "port Google Cast (8008)"),
-              8060: ("tv", 45, "contrôle Roku (8060)"), 62078: ("phone", 45, "synchronisation iOS (62078)"),
-              5555: ("phone", 15, "ADB Android (5555)"), 3389: ("desktop", 30, "Bureau à distance (3389)"),
-              135: ("desktop", 15, "RPC Windows (135)"), 445: ("desktop", 10, "partage SMB (445)"),
-              5000: ("nas", 15, "interface NAS (5000)"), 5001: ("nas", 15, "interface NAS (5001)"),
-              3306: ("server", 25, "MySQL (3306)"), 5432: ("server", 25, "PostgreSQL (5432)"),
-              6379: ("server", 25, "Redis (6379)"), 27017: ("server", 25, "MongoDB (27017)")}
+PORT_HINTS = {9100: ("printer", 40, N_("port d'impression 9100")), 631: ("printer", 40, N_("port d'impression IPP 631")),
+              515: ("printer", 30, N_("port d'impression LPD 515")), 554: ("camera", 30, N_("flux vidéo RTSP (554)")),
+              8009: ("tv", 30, N_("port Google Cast (8009)")), 8008: ("tv", 20, N_("port Google Cast (8008)")),
+              8060: ("tv", 45, N_("contrôle Roku (8060)")), 62078: ("phone", 45, N_("synchronisation iOS (62078)")),
+              5555: ("phone", 15, N_("ADB Android (5555)")), 3389: ("desktop", 30, N_("Bureau à distance (3389)")),
+              135: ("desktop", 15, N_("RPC Windows (135)")), 445: ("desktop", 10, N_("partage SMB (445)")),
+              5000: ("nas", 15, N_("interface NAS (5000)")), 5001: ("nas", 15, N_("interface NAS (5001)")),
+              3306: ("server", 25, N_("MySQL (3306)")), 5432: ("server", 25, N_("PostgreSQL (5432)")),
+              6379: ("server", 25, N_("Redis (6379)")), 27017: ("server", 25, N_("MongoDB (27017)"))}
 
 MDNS_HINTS = {"_ipp._tcp": ("printer", 50), "_ipps._tcp": ("printer", 50), "_printer._tcp": ("printer", 50),
               "_pdl-datastream._tcp": ("printer", 50), "_scanner._tcp": ("printer", 30),
@@ -192,15 +202,15 @@ def classify_detail(dev):
 
     def add(kind, pts, reason):
         score[kind] = score.get(kind, 0) + pts
-        why.setdefault(kind, []).append(reason)
+        why.setdefault(kind, []).append(tr(reason))
 
     if dev.get("is_self"):
         kind = dev.get("self_kind", "desktop")
-        return kind, 100, ["Cette machine"]
+        return kind, 100, [tr("Cette machine")]
     if dev.get("is_gateway"):
-        add("router", 60, "passerelle par défaut du réseau")
+        add("router", 60, N_("passerelle par défaut du réseau"))
     if dev.get("is_switch") and not dev.get("is_gateway"):
-        add("switch", 80, "équipement de commutation (table de ports SNMP ou voisin LLDP)")
+        add("switch", 80, N_("équipement de commutation (table de ports SNMP ou voisin LLDP)"))
     for p in dev["ports"]:
         if p in PORT_HINTS:
             k, pts, r = PORT_HINTS[p]
@@ -208,57 +218,57 @@ def classify_detail(dev):
     for svc in dev.get("mdns_services", []):
         if svc in MDNS_HINTS:
             k, pts = MDNS_HINTS[svc]
-            add(k, pts, f"annonce mDNS {svc}")
+            add(k, pts, tr("annonce mDNS {svc}", svc=svc))
     wtypes = " ".join((dev.get("wsd") or {}).get("types", [])).lower()  # WS-Discovery : types annoncés par l'appareil
     if "networkvideotransmitter" in wtypes:
-        add("camera", 60, "WS-Discovery : caméra ONVIF")
+        add("camera", 60, N_("WS-Discovery : caméra ONVIF"))
     if "printdevicetype" in wtypes or "printerservice" in wtypes:
-        add("printer", 60, "WS-Discovery : imprimante")
+        add("printer", 60, N_("WS-Discovery : imprimante"))
     elif "scandevicetype" in wtypes or "scannerservice" in wtypes:
-        add("printer", 25, "WS-Discovery : scanner")
+        add("printer", 25, N_("WS-Discovery : scanner"))
     if "computer" in wtypes:
-        add("desktop", 40, "WS-Discovery : ordinateur")
+        add("desktop", 40, N_("WS-Discovery : ordinateur"))
     nb = dev.get("netbios") or {}
     if nb.get("file_server") or nb.get("workgroup"):
-        add("desktop", 20, "NetBIOS : poste Windows / partage Samba")
+        add("desktop", 20, N_("NetBIOS : poste Windows / partage Samba"))
     ssdp = dev.get("ssdp") or {}
     dtype = (ssdp.get("dtype") or "").lower()
     if "printer" in dtype:
-        add("printer", 60, "UPnP : imprimante")
+        add("printer", 60, N_("UPnP : imprimante"))
     if "internetgatewaydevice" in dtype:
-        add("router", 50, "UPnP : passerelle Internet")
+        add("router", 50, N_("UPnP : passerelle Internet"))
     if "mediarenderer" in dtype:
-        add("tv", 25, "UPnP : lecteur multimédia")
+        add("tv", 25, N_("UPnP : lecteur multimédia"))
     seen = set()
-    for label, text, factor in (("modèle", _model_text(dev), 1.0),
-                                ("nom", " ".join([dev.get("hostname") or ""] + dev.get("mdns_names", []) + [dev.get("http_info") or ""]).lower(), 0.6),
-                                ("certificat", ((dev.get("cert") or {}).get("indicators") or "").lower(), 0.6)):
+    for label, text, factor in ((N_("modèle"), _model_text(dev), 1.0),
+                                (N_("nom"), " ".join([dev.get("hostname") or ""] + dev.get("mdns_names", []) + [dev.get("http_info") or ""]).lower(), 0.6),
+                                (N_("certificat"), ((dev.get("cert") or {}).get("indicators") or "").lower(), 0.6)):
         for pat, kind, pts in MODEL_PATTERNS:
             if kind not in seen and re.search(pat, text):
-                add(kind, pts * factor, f"{label} évocateur ({re.search(pat, text).group(0).strip()})")
+                add(kind, pts * factor, tr("{label} évocateur ({match})", label=tr(label), match=re.search(pat, text).group(0).strip()))
                 seen.add(kind)
     v = dev["vendor"]
     for kind, (vendors, pts) in VENDOR_PRIORS.items():
         if v and any(v.startswith(x) for x in vendors):
-            add(kind, pts, f"fabricant {v}")
+            add(kind, pts, tr("fabricant {vendor}", vendor=v))
     if v == "Apple" and dev.get("mdns_services") is not None and not score:
-        add("phone", 10, "fabricant Apple")
+        add("phone", 10, N_("fabricant Apple"))
     if dev.get("random_mac"):
-        add("phone", 20, "adresse MAC aléatoire (appareil mobile)")
-        add("tablet", 8, "adresse MAC aléatoire (appareil mobile)")
+        add("phone", 20, N_("adresse MAC aléatoire (appareil mobile)"))
+        add("tablet", 8, N_("adresse MAC aléatoire (appareil mobile)"))
     osn = dev.get("os", "")
     if osn == "iOS / iPadOS":
-        add("phone", 20, "système iOS")
+        add("phone", 20, N_("système iOS"))
     elif osn == "Android":
-        add("phone", 25, "système Android")
+        add("phone", 25, N_("système Android"))
     elif osn.startswith("Windows"):
-        add("desktop", 25, "système Windows")
+        add("desktop", 25, N_("système Windows"))
     elif osn.startswith("macOS"):
-        add("desktop", 15, "système macOS")
+        add("desktop", 15, N_("système macOS"))
     from . import rules  # import tardif : `rules` dépend de ce module
     um = rules.user_model(dev.get("model", ""))  # modèle défini par l'utilisateur, avec un type
     if um and um[1]:
-        add(um[1], 70, f"modèle « {um[0]} » (défini par vous)")
+        add(um[1], 70, tr("modèle « {model} » (défini par vous)", model=um[0]))
     forced = None
     for rk, pts, reason, force in rules.evaluate(dev):  # règles personnalisées de l'utilisateur
         add(rk, pts, reason)
@@ -266,7 +276,7 @@ def classify_detail(dev):
     if forced:
         return forced[0], 100, [forced[1]] + [r for r in why.get(forced[0], []) if r != forced[1]][:4]
     if not score:
-        return "unknown", 0, ["aucun indice exploitable"]
+        return "unknown", 0, [tr("aucun indice exploitable")]
     kind = max(score, key=score.get)
     if score[kind] < 15:
         return "unknown", int(score[kind]), why[kind]
@@ -278,9 +288,9 @@ def classify(dev):
 
 
 def confidence_label(conf):
-    return "élevée" if conf >= 70 else "moyenne" if conf >= 40 else "faible"
+    return tr("élevée") if conf >= 70 else tr("moyenne") if conf >= 40 else tr("faible")
 
 
 def vendor_hint(mac):
     """Étiquette lisible pour les MAC aléatoires."""
-    return "MAC aléatoire" if is_random_mac(mac) else ""
+    return tr("MAC aléatoire") if is_random_mac(mac) else ""

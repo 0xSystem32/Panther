@@ -3,6 +3,7 @@
 Module pur. Il ne fait que *suggérer* ; la fusion est toujours confirmée par l'utilisateur.
 """
 from . import fingerprint
+from .i18n import tr
 
 
 def _name(d):
@@ -24,9 +25,9 @@ def suggest_duplicates(devices):
             t1, t2 = new.get("auto_type", new.get("type")), old.get("auto_type", old.get("type"))
             if t1 != t2 and "unknown" not in (t1, t2):
                 continue
-            reasons = [f"même nom « {new.get('hostname')} »", "même type" if t1 == t2 else "type compatible"]
+            reasons = [tr("même nom « {hostname} »", hostname=new.get('hostname')), tr("même type") if t1 == t2 else tr("type compatible")]
             if fingerprint.is_random_mac(new.get("mac", "")) or fingerprint.is_random_mac(old.get("mac", "")):
-                reasons.append("adresse MAC aléatoire (change d'un réseau à l'autre)")
+                reasons.append(tr("adresse MAC aléatoire (change d'un réseau à l'autre)"))
             elif not new.get("new"):
                 continue  # ni MAC aléatoire, ni nouvel appareil : rien ne justifie de les rapprocher
             used.add(id(old))

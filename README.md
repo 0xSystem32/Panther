@@ -1,145 +1,186 @@
 # Panther
 
-**Scanner et cartographie de réseau local** : Panther détecte les appareils du réseau (téléphones, imprimantes, TV,
-caméras, NAS, switchs…), dessine la carte, suit leur présence dans le temps, gère plusieurs réseaux et VLAN,
-compare deux scans et exporte des rapports PDF. Le moteur de scan est **écrit à la main en Python standard**
-(pas de nmap, pas de root pour l'essentiel) ; seule l'interface graphique utilise PyQt6.
+**English** · [Français](README.fr.md)
 
-![Démonstration : un scan qui progresse puis la carte hiérarchique](docs/img/demo.gif)
+**Local network scanner and mapper**: Panther discovers the devices on your network (phones, printers, TVs, cameras, NAS,
+switches…), draws the map, tracks their presence over time, handles several networks and VLANs, compares two scans and
+exports PDF reports. The scan engine is **hand-written in standard-library Python** (no nmap, no root for most things);
+only the graphical interface uses PyQt6. The interface is available in **English and French**.
 
-> Les captures de ce dépôt viennent d'un **réseau fictif** (`tools/make_screenshots.py`), jamais d'un vrai réseau.
+![Demo: a scan in progress, then the hierarchical map](docs/img/en/demo.gif)
 
-## Fonctions
+> The screenshots in this repository come from a **fictional network** (`tools/make_screenshots.py`), never from a real one.
 
-- **Détection des appareils** : découverte ARP, SSDP/UPnP, mDNS/Bonjour, WS-Discovery (caméras ONVIF, imprimantes, PC Windows),
-  NetBIOS, titre et `realm` des pages HTTP(S), **certificat HTTPS** (marque, modèle, expiration), baux DHCP locaux ; fabricant (base IEEE), ports, bannières, système,
-  modèle lisible (« iPhone14,2 » → « iPhone 13 Pro ») ; classification **par score** avec niveau de confiance et liste des indices
-  (« pourquoi c'est une imprimante »), un logo par type (téléphone, tablette, TV, imprimante, console, enceinte,
-  caméra, NAS, switch, routeur…). Nom et type corrigeables à la main, et **règles de détection personnalisées** dans un fichier
-  JSON (`docs/REGLES.md`) : clic droit sur un appareil → « Créer une règle de détection… ».
-- **Deux cartes** : *étoile* autour de cette machine, ou *hiérarchique* (Internet → box → switch → appareils) ;
-  votre chemin vers Internet est tracé en bleu, les positions des nœuds sont mémorisées.
-- **Plusieurs réseaux et VLAN** : plages saisies à la main ou détectées (routes, interfaces 802.1Q, passerelles),
-  chemin traceroute, avertissement si un réseau ne répond pas, **SNMP** en lecture seule (adresses MAC et ports de
-  switch d'autres VLAN), voisins **LLDP/CDP**.
-- **Surveillance** : découverte par **ARP** (scan normal ≈ 10 s), scan de **présence** (≈ 2 s, presque aucun trafic) qui réutilise
-  les détails du dernier scan complet, arrêt du scan, profondeur rapide / normal / approfondi, scan automatique
-  (présence + un scan complet par heure), appareils *hors ligne*, *nouveaux* appareils avec notification de bureau.
-- **Historique** (SQLite) : présence sur les derniers scans, disponibilité, journal des événements (nouvel appareil,
-  changement d'IP, hors ligne, retour…), appareils **de confiance**, **comparaison de deux scans**, **fusion de doublons**
-  (une MAC « privée » qui change : suggestion automatique, alias conservés), taille et purge configurables.
-- **Analyse de sécurité optionnelle, en lecture seule** : ports sensibles, services accessibles sans mot de passe,
-  services obsolètes, avec gravité et recommandation ; nouvelles expositions et expositions corrigées dans le journal.
-- **Rapports** : PDF (résumé, carte, changements, appareils, exposition), Markdown (sécurité), JSON, CSV.
-- **Interfaces** : fenêtre Qt (thème sombre ou clair), interface web locale, ligne de commande.
+## Try it in 10 seconds
 
-## Captures
+    ./run.sh --demo        # fictional network: nothing is scanned, no configuration is read or written
 
-| Carte en étoile | Carte hiérarchique |
+## Features
+
+- **Device detection**: ARP discovery, SSDP/UPnP, mDNS/Bonjour, WS-Discovery (ONVIF cameras, printers, Windows PCs), NetBIOS,
+  HTTP(S) page title and `realm`, **HTTPS certificate** (brand, model, expiry), local DHCP leases; vendor (IEEE database),
+  ports, banners, operating system, readable model (“iPhone14,2” → “iPhone 13 Pro”); **score-based** classification with a
+  confidence level and the list of clues (“why is this a printer”), one icon per type (phone, tablet, TV, printer, console,
+  speaker, camera, NAS, switch, router…). Name and type can be corrected by hand, and **custom detection rules** live in a JSON
+  file (`docs/RULES.md`): right-click a device → “Create a detection rule…”.
+- **Three maps**: *star* around this machine, *hierarchical* (Internet → router → switch → devices) or *grouped by device
+  type*; your path to the Internet is drawn in blue, node positions are remembered per layout. A **mini-map** appears when
+  you zoom in (click or drag it to move), **Shift-drag** selects several devices (or **Ctrl-click**), and a selection can be
+  trusted or tagged in one go; *View → Center on selection* (`Ctrl+Shift+0`) finds a device again.
+- **Several networks and VLANs**: ranges typed by hand or detected (routes, 802.1Q interfaces, gateways), traceroute path,
+  warning when a network does not answer, read-only **SNMP** (MAC addresses and switch ports of other VLANs), **LLDP/CDP**
+  neighbours.
+- **Monitoring**: **ARP** discovery (normal scan ≈ 10 s), **presence** scan (≈ 2 s, almost no traffic) that reuses the details
+  of the last full scan, stoppable scans, quick / normal / thorough depth, automatic scan (presence + one full scan per
+  hour), *offline* devices, *new* devices with a desktop notification.
+- **History** (SQLite): presence over the last scans, availability, event log (new device, IP change, offline, back…),
+  **trusted** devices, **comparison of two scans**, **duplicate merging** (a “private” MAC that changes: automatic
+  suggestion, aliases kept), configurable size and purge.
+- **Optional read-only security analysis**: sensitive ports, services reachable without a password, obsolete services, with
+  severity and recommendation; new and fixed exposures in the log.
+- **Organisation**: tags, notes and groups per device (“kids”, “home automation”) with matching filters; Wake-on-LAN for an
+  offline device.
+- **Alerts** (Discord / Slack / ntfy / JSON webhook, or SMTP e-mail): one grouped message per scan for a new device, a new
+  exposure or a trusted device going offline; the webhook URL and the SMTP password are stored in the system keyring (or a
+  private file), never in the settings.
+- **Reports**: PDF (summary, map, changes, devices, exposure), Markdown (security), enriched JSON and CSV, map as PNG or SVG;
+  **scheduled PDF report** (daily or weekly) in a chosen folder, with the oldest ones removed (File → “Scheduled reports…”).
+- **Vendor database**: update from the menu (IEEE), with confirmation.
+- **Privacy**: listen-only mode (no probe sent), “Erase everything” for the history, SNMP community in the system keyring,
+  data folder in mode 700 and database/log in mode 600 (see [SECURITY.md](SECURITY.md)).
+- **Accessibility**: theme that follows the system (or dark, light, **high contrast**; every theme is checked against WCAG
+  contrast ratios by the tests), adjustable **text size**, visible keyboard focus, a map you can walk with the arrow keys
+  (Enter edits, Esc clears, `+`/`−` zoom), and a *Devices* tab that lists the same devices as a table for screen readers. A
+  **first-run assistant** (language, responsible use, appearance, scanning options) can be reopened from *Help*.
+- **Interfaces**: Qt window (English or French), local web interface, command line.
+
+## Screenshots
+
+| Star map | Hierarchical map |
 |---|---|
-| ![étoile](docs/img/carte-etoile.png) | ![hiérarchique](docs/img/carte-hierarchique.png) |
-| **Détails d'un appareil** | **Liste des appareils** |
-| ![détails](docs/img/carte-details.png) | ![liste](docs/img/appareils.png) |
-| **Journal** | **Analyse de sécurité** |
-| ![journal](docs/img/journal.png) | ![sécurité](docs/img/securite.png) |
-| **Comparer deux scans** | **Rapport PDF** |
-| ![comparaison](docs/img/comparaison.png) | ![pdf](docs/img/rapport-pdf.png) |
+| ![star](docs/img/en/carte-etoile.png) | ![hierarchical](docs/img/en/carte-hierarchique.png) |
+| **Device details** | **Device list** |
+| ![details](docs/img/en/carte-details.png) | ![list](docs/img/en/appareils.png) |
+| **Grouped by type** | **Zoom, mini-map, multi-selection** |
+| ![types](docs/img/en/carte-types.png) | ![selection](docs/img/en/carte-selection.png) |
+| **Log** | **Security analysis** |
+| ![log](docs/img/en/journal.png) | ![security](docs/img/en/securite.png) |
+| **Compare two scans** | **PDF report** |
+| ![comparison](docs/img/en/comparaison.png) | ![pdf](docs/img/en/rapport-pdf.png) |
 
 ## Installation
 
-Linux, Python ≥ 3.12. Aucun droit root pour scanner (sauf l'écoute LLDP/CDP, voir plus bas).
+Linux, Python ≥ 3.12. No root needed to scan (except for LLDP/CDP listening, see below).
 
-**Depuis les sources**
+**From source**
 
-    ./run.sh                  # crée .venv, installe PyQt6 au premier lancement, ouvre la fenêtre
+    ./run.sh                  # creates .venv, installs PyQt6 on first run, opens the window
 
-**Avec pipx**
+**With pipx**
 
-    pipx install .            # ou : pipx install dist/panther_netscan-0.1.0-py3-none-any.whl
+    pipx install .            # or: pipx install dist/panther_netscan-0.1.0-py3-none-any.whl
     panther
 
-**Paquet Debian / Ubuntu** (utilise le `python3-pyqt6` du système, pas de Qt embarqué)
+**Debian / Ubuntu package** (uses the system `python3-pyqt6`, no bundled Qt)
 
     ./packaging/build-deb.sh
     sudo apt install ./dist/panther-netscan_0.1.0_all.deb
 
-## Utilisation
+## Usage
 
-    panther                          # fenêtre
-    panther --web [--port 8765]      # interface web locale (127.0.0.1 uniquement)
-    panther --cli                    # tableau dans le terminal
+    panther                          # window
+    panther --web [--port 8765]      # local web interface (127.0.0.1 only)
+    panther --cli                    # table in the terminal
     panther --cli --depth rapide --target 192.168.20.0/24 --iface eth0
-    panther --cli --security         # + analyse de sécurité (lecture seule)
-    panther --verbose                # journal détaillé sur la console
+    panther --cli --security         # + security analysis (read-only)
+    panther --verbose                # detailed log on the console
+    panther --demo                   # fictional network to try the interface (no scan, no configuration touched)
+    panther --lang en                # interface language (fr or en); default: the saved choice, then the system's
 
-Dans la fenêtre : `Ctrl+R` lance le scan, `Ctrl+.` l'arrête, `Ctrl+0` recentre la carte ; clic droit sur un appareil
-pour le renommer, changer son type ou le marquer de confiance.
+In the window: `Ctrl+R` starts the scan, `Ctrl+.` stops it, `Ctrl+0` recenters the map, `Ctrl+Shift+0` centers it on the selection; right-click a device to rename it,
+change its type or mark it as trusted. The language is chosen in the *View → Language* menu (applied at the next start).
 
-## Fonctionnement
+## How it works
 
-| Module (`panther/`) | Rôle |
+| Module (`panther/`) | Role |
 |---|---|
-| `scanner.py` | moteur : découverte ARP/TCP, profils de profondeur, présence, annulation, analyse de chaque appareil |
-| `discovery.py`, `dhcp.py` | SSDP/UPnP, mDNS/Bonjour, WS-Discovery (analyse des paquets écrite à la main) ; baux DHCP |
-| `fingerprint.py`, `rules.py`, `models.py` | fabricant (OUI), système, classification par score ; règles personnalisées ; noms de modèles |
-| `networks.py`, `topology.py` | interfaces, VLAN, plages ; traceroute, voisins LLDP/CDP |
-| `snmp.py` | client SNMP v2c en lecture seule (BER écrit à la main) |
-| `security.py` | règles d'exposition et vérifications sans authentification |
-| `history.py`, `store.py`, `compare.py`, `identity.py` | base SQLite (historique, journal, confiance, positions, instantanés, alias), réglages manuels, comparaison, doublons probables |
-| `layout.py` | arbre de la topologie et disposition hiérarchique |
-| `gui.py`, `reportpdf.py`, `log.py` | fenêtre Qt, rapport PDF, journal d'erreurs |
-| `server.py`, `static/` | interface web locale |
+| `scanner.py` | engine: ARP/TCP discovery, depth profiles, presence, cancellation, analysis of each device |
+| `discovery.py`, `dhcp.py` | SSDP/UPnP, mDNS/Bonjour, WS-Discovery (packet parsing written by hand); DHCP leases |
+| `fingerprint.py`, `rules.py`, `models.py` | vendor (OUI), system, score-based classification; custom rules; model names |
+| `networks.py`, `topology.py` | interfaces, VLANs, ranges; traceroute, LLDP/CDP neighbours |
+| `snmp.py` | read-only SNMP v2c client (BER written by hand) |
+| `security.py` | exposure rules and unauthenticated checks |
+| `history.py`, `store.py`, `compare.py`, `identity.py` | SQLite database (history, log, trust, positions, snapshots, aliases), manual settings, comparison, likely duplicates |
+| `layout.py` | topology tree and hierarchical layout |
+| `demo.py` | demo mode: fictional network, fake scan engine, temporary configuration |
+| `i18n.py`, `lang_en.py`, `labels.py` | translation (French source text, English catalogue), device-type labels |
+| `gui.py`, `reportpdf.py`, `log.py` | Qt window, PDF report, error log |
+| `server.py`, `static/` | local web interface |
 
-Données : `~/.config/Panther/` (`panther.db` = historique, `devices.json` = noms et types choisis à la main,
-`rules.json` = règles de détection, `panther.log` = journal d'erreurs : adresses et noms d'appareils, jamais de mot de passe ni de communauté SNMP ; `--verbose`
-pour le détail) ;
-`panther/oui.txt` = base des fabricants.
+Data: `~/.config/Panther/` (`panther.db` = history, `devices.json` = names and types set by hand, `rules.json` = detection
+rules, `panther.log` = error log: device addresses and names, never a password or SNMP community; `--verbose` for details);
+`panther/oui.txt` = vendor database.
 
-### Ce que fait l'analyse de sécurité
+### Languages
 
-Désactivée par défaut, activée par le menu *Sécurité* après un message d'information. Panther regarde les ports
-ouverts et les bannières, et envoie **une seule requête de lecture sans identifiant** à quelques services (PING
-Redis, `version` Memcached, `GET /` Elasticsearch, `GET /version` Docker, `DESCRIBE` RTSP) pour savoir s'ils
-répondent sans mot de passe. Il **n'essaie aucun identifiant, ne devine aucun mot de passe, n'exploite aucune
-faille**. Les versions annoncées par les bannières sont des indices : sur Linux, les correctifs sont souvent
-rétroportés, la version affichée ne prouve donc pas une faille.
+French is the source language of every text; `panther/lang_en.py` holds the English catalogue. `python3 tools/i18n_check.py`
+(and `tests/test_i18n.py`) fail if a text has no translation, if a translation has stale entries or different placeholders,
+and an offscreen test walks the whole English interface looking for French leftovers. Texts that are *stored* (the event
+log, security findings recorded in history) keep the language they were written in.
 
-### SNMP et LLDP/CDP (optionnels)
+### What the security analysis does
 
-La communauté SNMP est enregistrée **en clair** dans la configuration de l'application : n'utilisez qu'une
-communauté en lecture seule.
+Disabled by default, enabled from the *Security* menu after an information message. Panther looks at open ports and banners,
+and sends **a single read request without credentials** to a few services (Redis PING, Memcached `version`, Elasticsearch
+`GET /`, Docker `GET /version`, RTSP `DESCRIBE`) to find out whether they answer without a password. It **does not try any
+credentials, does not guess any password, does not exploit any vulnerability**. The versions announced by banners are clues:
+on Linux, fixes are often backported, so the displayed version does not prove a flaw.
 
-Pour voir les voisins LLDP/CDP (nom du switch, port, VLAN), installez **`lldpd`** (`sudo apt install lldpd`) :
-Panther l'interroge, sans droits particuliers. Sans `lldpd`, l'écoute directe demande un socket brut (`cap_net_raw`) ;
-n'accordez pas cette capacité à l'interpréteur Python du système (tous vos scripts Python en profiteraient). Sans
-l'un ni l'autre, Panther l'indique clairement et continue.
+### Listen-only mode
 
-## Limites
+*Security → Listen-only* menu (or `panther --cli --depth ecoute`): Panther sends **nothing** (no forced ARP, no TCP
+connection, no SSDP/mDNS query, no name resolution, no SNMP, no traceroute, no security analysis). It reads the kernel's
+neighbour table and the local DHCP leases and reuses the details of the last full scan. Devices never seen before appear with
+their vendor (from the MAC) only; an old kernel entry can show a device that has just left for a few minutes.
 
-- Au-delà d'un routeur, l'ARP ne passe pas : pas d'adresse MAC ni de fabricant, sauf via SNMP ; les annonces
-  mDNS/UPnP ne traversent pas non plus les routeurs.
-- Le routage entre VLAN et le pare-feu doivent laisser passer les sondes.
-- Sans SNMP ni LLDP, tous les appareils du réseau local sont rattachés à la box sur la carte hiérarchique (le Wi-Fi et
-  le câble ne se distinguent pas) : Panther ne dessine que les liens qu'il connaît.
-- Un appareil dont l'adresse MAC change (MAC « privée » des téléphones) apparaît comme un nouvel appareil.
+### SNMP and LLDP/CDP (optional)
 
-## Usage éthique et légal
+The SNMP community is stored in the **system keyring** (`secret-tool`, GNOME Keyring / KWallet) when it is installed,
+otherwise in a private file in mode 600; it is never written to the settings or the log. An old plain-text configuration is
+migrated automatically. Still, only use a read-only community.
 
-N'utilisez Panther que sur des réseaux **dont vous avez la responsabilité ou l'autorisation écrite**. Scanner un
-réseau qui n'est pas le vôtre peut être illégal. Par prudence, Panther refuse les plages d'adresses publiques,
-limite la taille des plages, n'écoute que sur `127.0.0.1` pour son interface web et ne tente jamais de se connecter
-à un appareil avec des identifiants. Les auteurs déclinent toute responsabilité en cas de mauvais usage.
+To see LLDP/CDP neighbours (switch name, port, VLAN), install **`lldpd`** (`sudo apt install lldpd`): Panther queries it
+without any special privilege. Without `lldpd`, direct listening needs a raw socket (`cap_net_raw`); do not grant that
+capability to the system Python interpreter (all your Python scripts would benefit from it). Without either, Panther says so
+clearly and carries on.
 
-## Développement
+## Limits
 
-    python3 -m unittest discover -s tests -t .                       # moteur (bibliothèque standard seule)
-    QT_QPA_PLATFORM=offscreen .venv/bin/python -m unittest discover -s tests -t .   # + interface et PDF (PyQt6)
-    python3 tools/update_oui.py                                      # met à jour la base des fabricants (IEEE)
-    QT_QPA_PLATFORM=offscreen .venv/bin/python tools/make_screenshots.py   # régénère captures et GIF (réseau fictif)
+- Beyond a router, ARP does not pass: no MAC address or vendor, except through SNMP; mDNS/UPnP announcements do not cross
+  routers either.
+- Routing between VLANs and the firewall must let the probes through.
+- Without SNMP or LLDP, all devices of the local network are attached to the router on the hierarchical map (Wi-Fi and
+  cable cannot be told apart): Panther only draws the links it knows.
+- A device whose MAC address changes (phones' “private” MAC) appears as a new device.
 
-L'intégration continue ([.github/workflows/ci.yml](.github/workflows/ci.yml)) exécute les tests sur Python 3.12 et 3.13,
-les tests d'interface hors écran, puis construit le wheel et le `.deb`. Voir [CHECKLIST.md](CHECKLIST.md) pour le
-parcours du projet et [AMELIORATIONS.md](AMELIORATIONS.md) pour la suite.
+## Ethical and legal use
+
+Only use Panther on networks **you are responsible for or have written permission to scan**. Scanning a network that is not
+yours may be illegal. As a precaution, Panther refuses public address ranges, limits the size of ranges, only listens on
+`127.0.0.1` for its web interface and never tries to log in to a device with credentials. The authors accept no liability for
+misuse.
+
+## Development
+
+    python3 -m unittest discover -s tests -t .                       # engine (standard library only)
+    QT_QPA_PLATFORM=offscreen .venv/bin/python -m unittest discover -s tests -t .   # + interface and PDF (PyQt6)
+    python3 tools/i18n_check.py                                      # every text is translated
+    python3 tools/update_oui.py                                      # update the vendor database (IEEE)
+    QT_QPA_PLATFORM=offscreen .venv/bin/python tools/make_screenshots.py [fr|en]   # regenerate screenshots and GIF (fictional network)
+
+Continuous integration ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs the tests on Python 3.12 and 3.13, the
+offscreen interface tests, then builds the wheel and the `.deb`. See [CHECKLIST.md](CHECKLIST.md) for the project's path
+and [AMELIORATIONS.md](AMELIORATIONS.md) for what comes next (both in French).
 
 ## Licence
 

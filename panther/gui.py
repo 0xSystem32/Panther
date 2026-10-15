@@ -13,44 +13,96 @@ import sys
 import time
 
 from PyQt6.QtCore import QPointF, QRectF, QSettings, QSize, Qt, QThread, QTimer, QUrl, pyqtSignal
-from PyQt6.QtGui import (QAction, QActionGroup, QColor, QDesktopServices, QFont, QFontMetrics, QIcon, QImage, QPainter, QPainterPath, QPen,
+from PyQt6.QtGui import (QAction, QActionGroup, QColor, QDesktopServices, QFont, QGuiApplication, QFontMetrics, QIcon, QImage, QPainter, QPainterPath, QPen,
                          QPixmap)
 from PyQt6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QMenu, QFormLayout, QFrame,
                              QGraphicsItem, QGraphicsLineItem, QGraphicsPathItem, QGraphicsScene,
                              QGraphicsView, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget, QListWidgetItem,
-                             QMainWindow, QMessageBox, QProgressBar, QPushButton,
-                             QScrollArea, QSizePolicy, QSpinBox, QSplitter, QSystemTrayIcon, QTableWidget, QTableWidgetItem,
+                             QMainWindow, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton,
+                             QScrollArea, QSizePolicy, QSpinBox, QSplitter, QStackedWidget, QSystemTrayIcon, QTableWidget, QTableWidgetItem,
                              QTabWidget, QToolBar, QVBoxLayout, QWidget)
 
+from . import alerts
 from . import compare
+from . import exporter
 from . import fingerprint
 from . import history
 from . import identity
 from . import layout
 from . import models
 from . import networks
+from . import ouiupdate
+from . import privacy
 from . import reportpdf
 from . import rules
+from . import schedule
+from . import secrets
 from . import security
 from . import store
+from . import wol
+from . import i18n
+from .i18n import N_, TrDict, plural, tr
+from .labels import TYPE_LABELS
 from .scanner import Scanner, local_network, reclassify
 
 log = logging.getLogger("panther.gui")
-LABELS = {"desktop": "Ordinateur", "laptop": "Portable", "phone": "Téléphone",
-          "printer": "Imprimante", "router": "Routeur / box", "tv": "TV / multimédia",
-          "tablet": "Tablette", "console": "Console de jeux", "speaker": "Enceinte connectée",
-          "switch": "Switch", "internet": "Internet", "net": "Réseau", "hop": "Routeur du chemin",
-          "gap": "Saut sans réponse", "camera": "Caméra", "server": "Serveur", "nas": "NAS", "iot": "Objet connecté",
-          "unknown": "Non identifié"}
+LABELS = TYPE_LABELS
 
 THEMES = {
     "dark": dict(bg="#1b1c1f", surface="#222428", panel="#26282d", border="#383b42",
-                 fg="#d9dce1", mut="#8b909a", acc="#4c8dff", acc_bg="#243652",
-                 grid="#2b2d32", hover="#2d3036", warn="#d9a441", ok="#4caf7d", bad="#e06c6c"),
+                 fg="#d9dce1", mut="#9397a1", acc="#5895ff", acc_bg="#243652", on_acc="#0b1020",
+                 grid="#2b2d32", hover="#2d3036", warn="#d9a441", ok="#4caf7d", bad="#e27878"),
     "light": dict(bg="#f1f2f4", surface="#ffffff", panel="#ffffff", border="#d2d5db",
-                  fg="#1f2329", mut="#6a707b", acc="#2563eb", acc_bg="#dce7fd",
-                  grid="#dfe1e6", hover="#eceef1", warn="#b7791f", ok="#2f855a", bad="#c53030"),
+                  fg="#1f2329", mut="#666c77", acc="#2160eb", acc_bg="#dce7fd", on_acc="#ffffff",
+                  grid="#dfe1e6", hover="#eceef1", warn="#926119", ok="#2b7a53", bad="#c53030"),
+    # contraste élevé : noir et blanc, contours francs, couleurs vives (rapports de contraste ≥ 7 : WCAG AAA)
+    "contrast": dict(bg="#000000", surface="#0a0a0a", panel="#0f0f0f", border="#ffffff",
+                     fg="#ffffff", mut="#e0e0e0", acc="#66ccff", acc_bg="#00405c", on_acc="#000000",
+                     grid="#262626", hover="#242424", warn="#ffd34d", ok="#6dffa5", bad="#ff8080"),
 }
+THEME_MODES = ("auto", "dark", "light", "contrast")
+TEXT_SIZES = (("small", N_("Petit"), 0.9), ("normal", N_("Normal"), 1.0), ("large", N_("Grand"), 1.2), ("xlarge", N_("Très grand"), 1.4))
+FONT_SCALE = 1.0  # taille du texte choisie (menu Affichage) : appliquée à la police de l'application et à celles dessinées sur la carte
+
+
+def fs(pt):
+    """Taille de police (points) mise à l'échelle du réglage « taille du texte »."""
+    return pt * FONT_SCALE
+
+
+_base_font = None
+
+
+def set_text_scale(scale):
+    """Applique la taille du texte : police de l'application + polices dessinées sur la carte (`fs`)."""
+    global FONT_SCALE, _base_font
+    app = QApplication.instance()
+    if _base_font is None:
+        _base_font = QFont(app.font())
+    FONT_SCALE = scale
+    f = QFont(_base_font)
+    f.setPointSizeF((_base_font.pointSizeF() if _base_font.pointSizeF() > 0 else 10.0) * scale)
+    app.setFont(f)
+
+
+def text_scale_of(key):
+    return next((k_scale for k, _l, k_scale in TEXT_SIZES if k == key), 1.0)
+
+
+def system_theme():
+    """« light » ou « dark » selon le thème du système (Qt ≥ 6.5) ; « dark » si le système ne le dit pas."""
+    try:
+        scheme = QGuiApplication.styleHints().colorScheme()
+    except (AttributeError, RuntimeError):
+        return "dark"
+    return "light" if scheme == Qt.ColorScheme.Light else "dark"
+
+
+def resolve_theme(mode):
+    """Nom d'un thème de THEMES pour un réglage (« auto » suit le système)."""
+    return system_theme() if mode == "auto" else mode if mode in THEMES else "dark"
+
+
 T = dict(THEMES["dark"])
 
 
@@ -68,6 +120,14 @@ def type_color(kind):
 def make_style():
     return f"""
 * {{ outline: 0; }}
+QPushButton:focus, QCheckBox:focus, QRadioButton:focus {{ border: 2px solid {T['acc']}; }}
+QCheckBox {{ spacing: 8px; }}
+QCheckBox::indicator {{ width: 16px; height: 16px; border: 2px solid {T['mut']}; border-radius: 4px; background: {T['surface']}; }}
+QCheckBox::indicator:checked {{ background: {T['acc']}; border-color: {T['acc']}; }}
+QCheckBox::indicator:disabled {{ border-color: {T['border']}; }}
+QTabBar::tab:focus {{ border: 1px solid {T['acc']}; }}
+QTableWidget:focus, QListWidget:focus, QPlainTextEdit:focus {{ border: 1px solid {T['acc']}; }}
+QMenuBar::item:focus {{ background: {T['hover']}; border: 1px solid {T['acc']}; }}
 QMainWindow, QWidget {{ background: {T['bg']}; color: {T['fg']}; }}
 QMenuBar {{ background: {T['panel']}; border-bottom: 1px solid {T['border']}; padding: 2px 4px; }}
 QMenuBar::item {{ padding: 5px 10px; background: transparent; border-radius: 4px; }}
@@ -89,7 +149,7 @@ QDialog {{ background: {T['panel']}; }}
 QPushButton {{ background: {T['surface']}; border: 1px solid {T['border']}; border-radius: 5px;
               padding: 6px 14px; }}
 QPushButton:hover {{ background: {T['hover']}; }}
-QPushButton#primary {{ background: {T['acc']}; border-color: {T['acc']}; color: #ffffff; font-weight: 600; }}
+QPushButton#primary {{ background: {T['acc']}; border-color: {T['acc']}; color: {T['on_acc']}; font-weight: 600; }}
 QPushButton#primary:hover {{ background: {T['acc']}; }}
 QPushButton#primary:disabled {{ background: {T['border']}; border-color: {T['border']}; color: {T['mut']}; }}
 QTabWidget::pane {{ border: 0; border-top: 1px solid {T['border']}; }}
@@ -119,8 +179,8 @@ QWidget#spacer {{ background: transparent; }}
 QFrame#side, QFrame#side QScrollArea, QFrame#side QScrollArea > QWidget > QWidget {{ background: {T['panel']}; border: 0; }}
 QFrame#sep {{ background: {T['border']}; max-height: 1px; min-height: 1px; }}
 QLabel {{ background: transparent; }}
-QLabel#title {{ font-size: 16px; font-weight: 600; }}
-QLabel#section {{ color: {T['mut']}; font-size: 11px; font-weight: 600; }}
+QLabel#title {{ font-size: {16 * FONT_SCALE:.0f}px; font-weight: 600; }}
+QLabel#section {{ color: {T['mut']}; font-size: {11 * FONT_SCALE:.0f}px; font-weight: 600; }}
 QLabel#key {{ color: {T['mut']}; }}
 QLabel#muted {{ color: {T['mut']}; }}
 QToolTip {{ background: {T['panel']}; color: {T['fg']}; border: 1px solid {T['border']}; padding: 4px; }}
@@ -195,11 +255,12 @@ def type_pixmap(kind, size, color=None, dpr=2):
     return pm
 
 
-EVENT_LABELS = {"first_seen": "Nouvel appareil", "online": "De retour en ligne", "offline": "Hors ligne",
-                "exposure": "Nouvelle exposition", "exposure_fixed": "Exposition corrigée", "merged": "Appareils fusionnés", "ip_changed": "Changement d'adresse IP", "trusted": "Marqué de confiance", "untrusted": "Confiance retirée"}
+EVENT_LABELS = TrDict({"first_seen": N_("Nouvel appareil"), "online": N_("De retour en ligne"), "offline": N_("Hors ligne"),
+                       "exposure": N_("Nouvelle exposition"), "exposure_fixed": N_("Exposition corrigée"), "merged": N_("Appareils fusionnés"),
+                       "ip_changed": N_("Changement d'adresse IP"), "trusted": N_("Marqué de confiance"), "untrusted": N_("Confiance retirée")})
 
 
-SECURITY_INFO = (
+SECURITY_INFO = N_(
     "L'analyse de sécurité est en lecture seule.\n\n"
     "Elle regarde les ports ouverts et les bannières, et envoie UNE requête de lecture sans identifiant à "
     "certains services pour savoir s'ils répondent sans mot de passe : PING (Redis), version (Memcached), "
@@ -213,22 +274,33 @@ def sev_color(sev):
 
 
 def human_size(n):
-    for unit in ("o", "Ko", "Mo", "Go"):
-        if n < 1024 or unit == "Go":
-            return f"{n:.0f} {unit}" if unit == "o" else f"{n:.1f} {unit}"
+    units = ("B", "KB", "MB", "GB") if i18n.language() == "en" else ("o", "Ko", "Mo", "Go")
+    for i, unit in enumerate(units):
+        if n < 1024 or i == len(units) - 1:
+            return f"{n:.0f} {unit}" if i == 0 else f"{n:.1f} {unit}"
         n /= 1024
 
 
-def plural(n, one, many):
-    return f"{n} {one if n == 1 else many}"
+def tip(text):
+    """Infobulle sûre : Qt affiche en HTML tout texte qui y ressemble, or noms, bannières et certificats viennent du réseau."""
+    return "<div style='white-space:pre-wrap'>" + html.escape(str(text), quote=False) + "</div>"
+
+
+def snmp_secret(host):
+    return f"snmp-community:{host}"
+
+
+def log_path():
+    from . import log as _log
+    return _log.PATH
 
 
 def when(ts):
-    return time.strftime("%d/%m/%Y %H:%M", time.localtime(ts)) if ts else ""
+    return time.strftime(i18n.when_format()[0], time.localtime(ts)) if ts else ""
 
 
 def when_short(ts):
-    return time.strftime("%d/%m %H:%M", time.localtime(ts)) if ts else ""
+    return time.strftime("%m-%d %H:%M" if i18n.language() == "en" else "%d/%m %H:%M", time.localtime(ts)) if ts else ""
 
 
 class PresenceBar(QWidget):
@@ -239,7 +311,7 @@ class PresenceBar(QWidget):
         self.flags = flags
         self.setFixedHeight(18)
         self.setMinimumWidth(10 * len(flags))
-        self.setToolTip(f"Vu dans {sum(flags)} des {len(flags)} derniers scans (le plus récent est à droite)")
+        self.setToolTip(tr("Vu dans {flags_total} des {flags_count} derniers scans (le plus récent est à droite)", flags_total=sum(flags), flags_count=len(flags)))
 
     def paintEvent(self, _e):
         p = QPainter(self)
@@ -255,13 +327,13 @@ def seen_label(ts):
     if not ts:
         return ""
     t = time.localtime(ts)
-    return time.strftime("%H:%M" if time.strftime("%Y%m%d", t) == time.strftime("%Y%m%d") else "%d/%m", t)
+    return time.strftime("%H:%M" if time.strftime("%Y%m%d", t) == time.strftime("%Y%m%d") else "%m-%d" if i18n.language() == "en" else "%d/%m", t)
 
 
 def status_text(d):
     if not d.get("online", True):
-        return f"Hors ligne (vu {seen_label(d.get('last_seen'))})"
-    return "Nouveau" if d.get("new") else "En ligne"
+        return tr("Hors ligne (vu {seen})", seen=seen_label(d.get('last_seen')))
+    return tr("Nouveau") if d.get("new") else tr("En ligne")
 
 
 KEY_ROLE = Qt.ItemDataRole.UserRole + 1
@@ -292,26 +364,26 @@ class EditDialog(QDialog):
 
     def __init__(self, dev, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Modifier l'appareil")
+        self.setWindowTitle(tr("Modifier l'appareil"))
         self.setMinimumWidth(380)
         auto = dev.get("auto_type", dev["type"])
         self.name = QLineEdit(dev["hostname"] if dev.get("custom") and "auto_hostname" in dev else "")
         self.name.setPlaceholderText(dev.get("auto_hostname", dev["hostname"]) or dev["ip"])
         self.name.setMaxLength(60)
         self.kind = QComboBox()
-        self.kind.addItem(f"Détection automatique ({LABELS.get(auto, '')})", None)
+        self.kind.addItem(tr("Détection automatique ({labels_label})", labels_label=LABELS.get(auto, '')), None)
         for k in fingerprint.KINDS:
             self.kind.addItem(QIcon(type_pixmap(k, 20)), LABELS[k], k)
         if "auto_type" in dev:
             self.kind.setCurrentIndex(self.kind.findData(dev["type"]))
         form = QFormLayout()
-        form.addRow("Nom", self.name)
-        form.addRow("Type", self.kind)
-        note = QLabel(f"Mémorisé pour l'adresse MAC {dev['mac'] or dev['ip']}.")
+        form.addRow(tr("Nom"), self.name)
+        form.addRow(tr("Type"), self.kind)
+        note = QLabel(tr("Mémorisé pour l'adresse MAC {mac}.", mac=dev['mac'] or dev['ip']))
         note.setObjectName("muted")
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Enregistrer")
-        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("Annuler")
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText(tr("Enregistrer"))
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(tr("Annuler"))
         buttons.accepted.connect(self.accept); buttons.rejected.connect(self.reject)
         lay = QVBoxLayout(self); lay.setContentsMargins(20, 20, 20, 16); lay.setSpacing(14)
         lay.addLayout(form); lay.addWidget(note); lay.addWidget(buttons)
@@ -347,7 +419,7 @@ class Zone(QGraphicsItem):
         pen = QPen(QColor(T["acc"]), 1.2, Qt.PenStyle.DashLine); pen.setCosmetic(True)
         p.setPen(pen); p.setBrush(fill)
         p.drawEllipse(QPointF(0, 0), self.r, self.r)
-        f = QFont(); f.setPointSizeF(9); f.setBold(True); p.setFont(f)
+        f = QFont(); f.setPointSizeF(fs(9)); f.setBold(True); p.setFont(f)
         w = QFontMetrics(f).horizontalAdvance(self.label) + 24
         box = QRectF(-w / 2, -self.r - 30, w, 24)
         p.setBrush(QColor(T["panel"])); p.setPen(QPen(QColor(T["acc"]), 1))
@@ -366,7 +438,7 @@ class ElidedLabel(QLabel):
 
     def setText(self, text):
         self._full = text
-        self.setToolTip(text)
+        self.setToolTip(tip(text))
         super().setText(text)
 
     def sizeHint(self):
@@ -396,24 +468,24 @@ class CompareDialog(QDialog):
 
     def __init__(self, scans, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Comparer deux scans")
+        self.setWindowTitle(tr("Comparer deux scans"))
         self.setMinimumSize(780, 540)
         self.a, self.b = QComboBox(), QComboBox()
         for sc in scans:
-            label = f"{when(sc['ts'])}  ·  {sc['depth'] or 'normal'}  ·  {sc['count']} appareil(s)"
+            label = tr("{when}  ·  {depth}  ·  {count} appareil(s)", when=when(sc['ts']), depth=sc['depth'] or 'normal', count=sc['count'])
             self.a.addItem(label, sc["id"]); self.b.addItem(label, sc["id"])
         self.a.setCurrentIndex(min(1, len(scans) - 1)); self.b.setCurrentIndex(0)
-        form = QFormLayout(); form.addRow("Scan de départ", self.a); form.addRow("Scan d'arrivée", self.b)
+        form = QFormLayout(); form.addRow(tr("Scan de départ"), self.a); form.addRow(tr("Scan d'arrivée"), self.b)
         self.summary = QLabel(); self.summary.setWordWrap(True)
         self.table = QTableWidget(0, 4)
-        self.table.setHorizontalHeaderLabels(["Changement", "Appareil", "Adresse IP", "Détail"])
+        self.table.setHorizontalHeaderLabels([tr("Changement"), tr("Appareil"), tr("Adresse IP"), tr("Détail")])
         self.table.setAlternatingRowColors(True); self.table.setShowGrid(False)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.verticalHeader().hide(); self.table.verticalHeader().setDefaultSectionSize(32)
         self.table.horizontalHeader().setStretchLastSection(True)
         close = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
-        close.button(QDialogButtonBox.StandardButton.Close).setText("Fermer"); close.rejected.connect(self.reject)
+        close.button(QDialogButtonBox.StandardButton.Close).setText(tr("Fermer")); close.rejected.connect(self.reject)
         lay = QVBoxLayout(self); lay.setContentsMargins(20, 20, 20, 16); lay.setSpacing(12)
         lay.addLayout(form); lay.addWidget(self.summary); lay.addWidget(self.table, 1); lay.addWidget(close)
         self.a.currentIndexChanged.connect(self.refresh); self.b.currentIndexChanged.connect(self.refresh)
@@ -424,15 +496,15 @@ class CompareDialog(QDialog):
         t.setRowCount(0)
         ia, ib = self.a.currentData(), self.b.currentData()
         if ia == ib:
-            self.summary.setText("Choisissez deux scans différents."); return
+            self.summary.setText(tr("Choisissez deux scans différents.")); return
         ra, rb = history.load_snapshot(ia), history.load_snapshot(ib)
         if ra is None or rb is None:
-            self.summary.setText("Instantané indisponible pour l'un des scans."); return
+            self.summary.setText(tr("Instantané indisponible pour l'un des scans.")); return
         res = compare.compare(ra, rb)
         rows = [("Nouveau", T["ok"], r["name"] or r["ip"], r["ip"], "") for r in res["new"]]
-        rows += [("Modifié", T["acc"], c["rec"]["name"] or c["rec"]["ip"], c["rec"]["ip"],
+        rows += [(tr("Modifié"), T["acc"], c["rec"]["name"] or c["rec"]["ip"], c["rec"]["ip"],
                   "  ;  ".join(compare.format_change(*ch) for ch in c["changes"])) for c in res["changed"]]
-        rows += [("Disparu", T["warn"], r["name"] or r["ip"], r["ip"], "") for r in res["gone"]]
+        rows += [(tr("Disparu"), T["warn"], r["name"] or r["ip"], r["ip"], "") for r in res["gone"]]
         t.setRowCount(len(rows))
         for r, (kind, col, name, ip, detail) in enumerate(rows):
             for c, v in enumerate((kind, name, ip, detail)):
@@ -440,12 +512,11 @@ class CompareDialog(QDialog):
                 if c == 0:
                     it.setForeground(QColor(col)); f = it.font(); f.setBold(True); it.setFont(f)
                 if c == 3:
-                    it.setForeground(QColor(T["mut"])); it.setToolTip(v)
+                    it.setForeground(QColor(T["mut"])); it.setToolTip(tip(v))
                 t.setItem(r, c, it)
         for c, w in enumerate((110, 200, 130)):
             t.setColumnWidth(c, w)
-        self.summary.setText(f"{plural(len(res['new']), 'nouveau', 'nouveaux')}  ·  {plural(len(res['gone']), 'disparu', 'disparus')}  ·  "
-                             f"{plural(len(res['changed']), 'modifié', 'modifiés')}  ·  {res['same']} inchangé(s)")
+        self.summary.setText(tr("{new}  ·  {gone}  ·  {changed}  ·  {same} inchangé(s)", new=plural(len(res['new']), 'nouveau', 'nouveaux'), gone=plural(len(res['gone']), 'disparu', 'disparus'), changed=plural(len(res['changed']), 'modifié', 'modifiés'), same=res['same']))
 
 
 class MergeDialog(QDialog):
@@ -460,10 +531,10 @@ class MergeDialog(QDialog):
         self.combo = QComboBox()
         for d in candidates:
             self.combo.addItem(QIcon(type_pixmap(d["type"], 20)),
-                               f"{d['hostname'] or d['ip']}  ·  {d['ip']}" + ("" if d.get("online", True) else f"  ·  hors ligne, vu {seen_label(d.get('last_seen'))}"))
+                               tr("{hostname}  ·  {ip}", hostname=d['hostname'] or d['ip'], ip=d['ip']) + ("" if d.get("online", True) else tr("  ·  hors ligne, vu {seen_label}", seen_label=seen_label(d.get('last_seen')))))
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Fusionner")
-        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("Annuler")
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText(tr("Fusionner"))
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(tr("Annuler"))
         buttons.accepted.connect(self.accept); buttons.rejected.connect(self.reject)
         lay = QVBoxLayout(self); lay.setContentsMargins(20, 20, 20, 16); lay.setSpacing(14)
         lay.addWidget(info); lay.addWidget(self.combo); lay.addWidget(buttons)
@@ -477,21 +548,21 @@ class DuplicatesDialog(QDialog):
 
     def __init__(self, suggestions, merge_cb, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Doublons probables")
+        self.setWindowTitle(tr("Doublons probables"))
         self.setMinimumSize(780, 360)
         self.items, self.merge_cb = list(suggestions), merge_cb
-        info = QLabel("Un appareil récent ressemble à un appareil hors ligne (même nom, même type, adresse MAC aléatoire). "
-                      "Si c'est le même, fusionnez-les : l'historique, la confiance et les noms seront regroupés.")
+        info = QLabel(tr("Un appareil récent ressemble à un appareil hors ligne (même nom, même type, adresse MAC aléatoire). "
+                         "Si c'est le même, fusionnez-les : l'historique, la confiance et les noms seront regroupés."))
         info.setWordWrap(True); info.setObjectName("muted")
         self.table = QTableWidget(0, 3)
-        self.table.setHorizontalHeaderLabels(["Appareil actuel", "Ressemble à (hors ligne)", "Pourquoi"])
+        self.table.setHorizontalHeaderLabels([tr("Appareil actuel"), tr("Ressemble à (hors ligne)"), tr("Pourquoi")])
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.verticalHeader().hide(); self.table.horizontalHeader().setStretchLastSection(True)
         self.table.setShowGrid(False); self.table.setAlternatingRowColors(True)
-        self.merge_btn = QPushButton("Fusionner la sélection"); self.merge_btn.setObjectName("primary")
+        self.merge_btn = QPushButton(tr("Fusionner la sélection")); self.merge_btn.setObjectName("primary")
         self.merge_btn.clicked.connect(self.merge_selected)
-        close = QPushButton("Fermer"); close.clicked.connect(self.accept)
+        close = QPushButton(tr("Fermer")); close.clicked.connect(self.accept)
         row = QHBoxLayout(); row.addStretch(1); row.addWidget(close); row.addWidget(self.merge_btn)
         lay = QVBoxLayout(self); lay.setContentsMargins(20, 20, 20, 16); lay.setSpacing(12)
         lay.addWidget(info); lay.addWidget(self.table, 1); lay.addLayout(row)
@@ -520,16 +591,54 @@ class DuplicatesDialog(QDialog):
             self.fill()
 
 
+class MetaDialog(QDialog):
+    """Étiquettes, note et groupe d'un appareil (enregistrés avec son historique, suivent les fusions)."""
+
+    def __init__(self, dev, groups, parent=None, count=1):
+        super().__init__(parent)
+        self.multi = count > 1  # plusieurs appareils : on ajoute des étiquettes et on pose un groupe, sans toucher aux notes
+        self.setWindowTitle(tr("Étiquettes et groupe : {count} appareils", count=count) if self.multi
+                            else tr("Étiquettes et notes : {hostname}", hostname=dev['hostname'] or dev['ip']))
+        self.setMinimumWidth(500)
+        self.group = QComboBox(); self.group.setEditable(True)
+        self.group.addItems([""] + list(groups))
+        self.group.setCurrentText("" if self.multi else dev.get("group", ""))
+        self.group.lineEdit().setPlaceholderText(tr("ex. Salon, Bureau, Invités…"))
+        self.tags = QLineEdit("" if self.multi else ", ".join(dev.get("tags", [])))
+        self.tags.setPlaceholderText(tr("étiquettes à ajouter à chacun, séparées par des virgules") if self.multi
+                                     else tr("ex. enfants, domotique, à surveiller"))
+        self.note = QPlainTextEdit(dev.get("note", ""))
+        self.note.setPlaceholderText(tr("Notes libres : emplacement, propriétaire, numéro de série…"))
+        self.note.setMinimumHeight(110)
+        form = QFormLayout()
+        form.addRow(tr("Groupe"), self.group); form.addRow(tr("Étiquettes"), self.tags)
+        if not self.multi:
+            form.addRow(tr("Notes"), self.note)
+        hint = QLabel(tr("Les étiquettes saisies s'ajoutent à celles de chaque appareil ; un groupe vide laisse le groupe actuel."))\
+            if self.multi else QLabel(tr("Filtrez ensuite avec « tag:enfants » ou « groupe:salon » dans la barre de recherche. Jusqu'à "
+                         "{max_tags} étiquettes de {max_tag_len} caractères.", max_tags=history.MAX_TAGS, max_tag_len=history.MAX_TAG_LEN))
+        hint.setWordWrap(True); hint.setObjectName("muted")
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText(tr("Enregistrer"))
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(tr("Annuler"))
+        buttons.accepted.connect(self.accept); buttons.rejected.connect(self.reject)
+        lay = QVBoxLayout(self); lay.setContentsMargins(20, 20, 20, 16); lay.setSpacing(12)
+        lay.addLayout(form); lay.addWidget(hint); lay.addWidget(buttons)
+
+    def values(self):
+        return self.group.currentText(), self.tags.text(), None if self.multi else self.note.toPlainText()
+
+
 class RuleFromDeviceDialog(QDialog):
     """Crée une règle de détection à partir d'un appareil : on choisit le type et les critères à retenir."""
 
-    CRITERIA = (("hostname", "Nom de l'appareil"), ("vendor", "Fabricant"), ("ports", "Ports ouverts"),
-                ("mdns", "Services annoncés (mDNS)"), ("mac", "Préfixe de l'adresse MAC (fabricant)"))
+    CRITERIA = (("hostname", N_("Nom de l'appareil")), ("vendor", N_("Fabricant")), ("ports", N_("Ports ouverts")),
+                ("mdns", N_("Services annoncés (mDNS)")), ("mac", N_("Préfixe de l'adresse MAC (fabricant)")))
 
     def __init__(self, dev, parent=None):
         super().__init__(parent)
         self.dev = dev
-        self.setWindowTitle("Créer une règle de détection")
+        self.setWindowTitle(tr("Créer une règle de détection"))
         self.setMinimumWidth(520)
         self.kind = QComboBox()
         for k in fingerprint.KINDS:
@@ -539,20 +648,20 @@ class RuleFromDeviceDialog(QDialog):
         self.name = QLineEdit(f"{dev['hostname'] or dev['ip']}")
         self.boxes = {}
         lay = QVBoxLayout(self); lay.setContentsMargins(20, 20, 20, 16); lay.setSpacing(12)
-        intro = QLabel(f"Quand un appareil ressemble à « {dev['hostname'] or dev['ip']} », Panther le classera dans le type choisi. "
-                       "Cochez ce qui doit être commun (plus de critères = règle plus précise).")
+        intro = QLabel(tr("Quand un appareil ressemble à « {hostname} », Panther le classera dans le type choisi. Cochez ce "
+                          "qui doit être commun (plus de critères = règle plus précise).", hostname=dev['hostname'] or dev['ip']))
         intro.setWordWrap(True); intro.setObjectName("muted")
-        form = QFormLayout(); form.addRow("Type", self.kind); form.addRow("Nom de la règle", self.name)
+        form = QFormLayout(); form.addRow(tr("Type"), self.kind); form.addRow(tr("Nom de la règle"), self.name)
         lay.addWidget(intro); lay.addLayout(form)
         for key, label in self.CRITERIA:
-            b = QCheckBox(label); b.setChecked(key in ("hostname", "ports"))
+            b = QCheckBox(tr(label)); b.setChecked(key in ("hostname", "ports"))
             b.stateChanged.connect(self.preview); self.boxes[key] = b; lay.addWidget(b)
         self.kind.currentIndexChanged.connect(self.preview); self.name.textChanged.connect(self.preview)
         self.view = QLabel(); self.view.setWordWrap(True); self.view.setTextFormat(Qt.TextFormat.PlainText)
         self.view.setObjectName("muted")
         self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        self.buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Enregistrer la règle")
-        self.buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("Annuler")
+        self.buttons.button(QDialogButtonBox.StandardButton.Ok).setText(tr("Enregistrer la règle"))
+        self.buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(tr("Annuler"))
         self.buttons.accepted.connect(self.accept); self.buttons.rejected.connect(self.reject)
         lay.addWidget(self.view); lay.addWidget(self.buttons)
         self.preview()
@@ -566,7 +675,7 @@ class RuleFromDeviceDialog(QDialog):
     def preview(self, *_):
         try:
             r = self.build()
-            self.view.setText("Règle : " + rules.describe(r))
+            self.view.setText(tr("Règle : ") + rules.describe(r))
             self.buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(True)
         except rules.RuleError as e:
             self.view.setText(str(e))
@@ -579,26 +688,26 @@ class RulesDialog(QDialog):
     def __init__(self, devices, on_change, parent=None):
         super().__init__(parent)
         self.devices, self.on_change = devices, on_change
-        self.setWindowTitle("Règles de détection personnalisées")
+        self.setWindowTitle(tr("Règles de détection personnalisées"))
         self.setMinimumSize(720, 520)
         self.info = QLabel(); self.info.setWordWrap(True); self.info.setTextFormat(Qt.TextFormat.PlainText); self.info.setObjectName("muted")
         self.warn = QLabel(); self.warn.setWordWrap(True); self.warn.setTextFormat(Qt.TextFormat.PlainText)
         self.warn.setStyleSheet(f"color: {T['warn']};")
         self.table = QTableWidget(0, 4)
-        self.table.setHorizontalHeaderLabels(["Règle", "Type", "Conditions", "Appareils"])
+        self.table.setHorizontalHeaderLabels([tr("Règle"), tr("Type"), tr("Conditions"), tr("Appareils")])
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.verticalHeader().hide(); self.table.horizontalHeader().setStretchLastSection(True)
         self.table.setShowGrid(False); self.table.setAlternatingRowColors(True)
         btns = []
-        for text, fn in (("Modifier le fichier", self.open_file), ("Recharger", self.reload), ("Créer un exemple", self.example),
-                         ("Supprimer la règle", self.remove), ("Exporter…", self.export), ("Importer…", self.import_)):
+        for text, fn in ((tr("Modifier le fichier"), self.open_file), (tr("Recharger"), self.reload), (tr("Créer un exemple"), self.example),
+                         (tr("Supprimer la règle"), self.remove), (tr("Exporter…"), self.export), (tr("Importer…"), self.import_)):
             b = QPushButton(text); b.clicked.connect(fn); btns.append(b)
         self.example_btn = btns[2]
         row = QHBoxLayout()
         for b in btns:
             row.addWidget(b)
-        close = QPushButton("Fermer"); close.setObjectName("primary"); close.clicked.connect(self.accept)
+        close = QPushButton(tr("Fermer")); close.setObjectName("primary"); close.clicked.connect(self.accept)
         lay = QVBoxLayout(self); lay.setContentsMargins(20, 20, 20, 16); lay.setSpacing(12)
         lay.addWidget(self.info); lay.addWidget(self.warn); lay.addWidget(self.table, 1); lay.addLayout(row)
         end = QHBoxLayout(); end.addStretch(1); end.addWidget(close); lay.addLayout(end)
@@ -611,9 +720,8 @@ class RulesDialog(QDialog):
             raw = {x.get("name"): x for x in (rules.read_data().get("rules", []) or []) if isinstance(x, dict)}
         except rules.RuleError:
             raw = {}
-        self.info.setText(f"Fichier : {rules.PATH}\n{plural(len(rs.rules), 'règle valide', 'règles valides')} · "
-                          f"{plural(len(rs.models), 'modèle personnalisé', 'modèles personnalisés')}. "
-                          "Chaque règle ajoute des points au type indiqué ; la détection intégrée garde son rôle (\"force\": true impose le type).")
+        self.info.setText(tr("Fichier : {path}\n{rules} · {models}. Chaque règle ajoute des points au type indiqué ; la détection "
+                             "intégrée garde son rôle (\"force\": true impose le type).", path=rules.PATH, rules=plural(len(rs.rules), 'règle valide', 'règles valides'), models=plural(len(rs.models), 'modèle personnalisé', 'modèles personnalisés')))
         self.warn.setText("\n".join("⚠ " + w for w in rs.warnings))
         self.warn.setVisible(bool(rs.warnings))
         t = self.table
@@ -642,36 +750,36 @@ class RulesDialog(QDialog):
         try:
             rules.create_example()
         except OSError as e:
-            QMessageBox.warning(self, "Panther", f"Impossible d'écrire le fichier :\n{e}"); return
+            QMessageBox.warning(self, tr("Panther"), tr("Impossible d'écrire le fichier :\n{e}", e=e)); return
         self.reload()
 
     def remove(self):
         name = self.selected_name()
-        if name and QMessageBox.question(self, "Supprimer", f"Supprimer la règle « {name} » ?") == QMessageBox.StandardButton.Yes:
+        if name and QMessageBox.question(self, tr("Supprimer"), tr("Supprimer la règle « {name} » ?", name=name)) == QMessageBox.StandardButton.Yes:
             try:
                 rules.remove_rule(name)
             except (OSError, rules.RuleError) as e:
-                QMessageBox.warning(self, "Panther", f"Impossible de modifier le fichier :\n{e}"); return
+                QMessageBox.warning(self, tr("Panther"), tr("Impossible de modifier le fichier :\n{e}", e=e)); return
             self.reload()
 
     def export(self):
-        path, _ = QFileDialog.getSaveFileName(self, "Exporter les règles", "regles-panther.json", "JSON (*.json)")
+        path, _ = QFileDialog.getSaveFileName(self, tr("Exporter les règles"), "regles-panther.json", "JSON (*.json)")
         if path:
             try:
                 rules.export_to(path)
             except (OSError, rules.RuleError) as e:
-                QMessageBox.warning(self, "Panther", f"Export impossible :\n{e}")
+                QMessageBox.warning(self, tr("Panther"), tr("Export impossible :\n{e}", e=e))
 
     def import_(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Importer des règles", "", "JSON (*.json)")
+        path, _ = QFileDialog.getOpenFileName(self, tr("Importer des règles"), "", "JSON (*.json)")
         if not path:
             return
         try:
             added, warnings = rules.import_from(path)
         except (OSError, rules.RuleError) as e:
-            QMessageBox.warning(self, "Panther", f"Import impossible :\n{e}"); return
-        QMessageBox.information(self, "Import", f"{plural(added, 'règle importée', 'règles importées')}."
-                                + ("\n\nÉcartées :\n" + "\n".join(warnings) if warnings else ""))
+            QMessageBox.warning(self, tr("Panther"), tr("Import impossible :\n{e}", e=e)); return
+        QMessageBox.information(self, tr("Import"), tr("{count}.", count=plural(added, 'règle importée', 'règles importées'))
+                                + (tr("\n\nÉcartées :\n") + "\n".join(warnings) if warnings else ""))
         self.reload()
 
 
@@ -680,47 +788,275 @@ class DataDialog(QDialog):
 
     def __init__(self, scans_days, events_days, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Historique et données")
+        self.setWindowTitle(tr("Historique et données"))
         self.setMinimumWidth(500)
         self.info = QLabel(); self.info.setTextFormat(Qt.TextFormat.PlainText)
         self.sp_scans, self.sp_events = QSpinBox(), QSpinBox()
         for sp, v in ((self.sp_scans, scans_days), (self.sp_events, events_days)):
-            sp.setRange(7, 3650); sp.setValue(v); sp.setSuffix(" jours")
+            sp.setRange(7, 3650); sp.setValue(v); sp.setSuffix(tr(" jours"))
         form = QFormLayout()
-        form.addRow("Conserver la présence détaillée", self.sp_scans)
-        form.addRow("Conserver le journal", self.sp_events)
-        note = QLabel("La purge supprime aussi les instantanés qui servent à comparer deux scans. Les appareils connus, leur confiance "
-                      "et leurs noms sont conservés.")
+        form.addRow(tr("Conserver la présence détaillée"), self.sp_scans)
+        form.addRow(tr("Conserver le journal"), self.sp_events)
+        note = QLabel(tr("La purge supprime aussi les instantanés qui servent à comparer deux scans. Les appareils connus, "
+                         "leur confiance et leurs noms sont conservés."))
         note.setWordWrap(True); note.setObjectName("muted")
         self.result = QLabel(""); self.result.setObjectName("muted")
-        purge = QPushButton("Purger maintenant"); purge.clicked.connect(self.purge)
-        close = QPushButton("Enregistrer et fermer"); close.setObjectName("primary"); close.clicked.connect(self.accept)
+        purge = QPushButton(tr("Purger maintenant")); purge.clicked.connect(self.purge)
+        self.erase_names = QCheckBox(tr("Effacer aussi les noms et types choisis à la main")); self.erase_names.setChecked(True)
+        self.erase_log = QCheckBox(tr("Effacer aussi le journal d'erreurs (adresses et noms d'appareils)")); self.erase_log.setChecked(True)
+        erase = QPushButton(tr("Tout effacer…")); erase.clicked.connect(self.erase_everything)
+        close = QPushButton(tr("Enregistrer et fermer")); close.setObjectName("primary"); close.clicked.connect(self.accept)
         row = QHBoxLayout(); row.addWidget(purge); row.addStretch(1); row.addWidget(close)
+        self.erased = False
         lay = QVBoxLayout(self); lay.setContentsMargins(20, 20, 20, 16); lay.setSpacing(14)
         for w in (self.info,):
             lay.addWidget(w)
         lay.addLayout(form); lay.addWidget(note); lay.addWidget(self.result); lay.addLayout(row)
+        sep = QFrame(); sep.setFrameShape(QFrame.Shape.HLine)
+        danger = QLabel(tr("Effacer l'historique supprime les appareils connus, la présence, le journal, les comparaisons, les "
+                           "positions de la carte, les étiquettes et les alias. Les règles de détection, les alertes et les "
+                           "secrets ne sont pas touchés."))
+        danger.setWordWrap(True); danger.setObjectName("muted")
+        lay.addWidget(sep); lay.addWidget(danger); lay.addWidget(self.erase_names); lay.addWidget(self.erase_log)
+        erow = QHBoxLayout(); erow.addStretch(1); erow.addWidget(erase); lay.addLayout(erow)
+        self.refresh()
+
+    def erase_everything(self):
+        if QMessageBox.question(self, tr("Tout effacer ?"), tr("Supprimer définitivement tout l'historique de Panther ?\n\nCette action est irréversible.")) \
+                != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            n = history.erase_all()
+        except (sqlite3.Error, OSError) as e:
+            self.result.setText(tr("Effacement impossible : {e}", e=e)); return
+        extra = []
+        if self.erase_names.isChecked():
+            extra.append(plural(store.erase(), "nom choisi effacé", "noms choisis effacés"))
+        if self.erase_log.isChecked():
+            extra.append(tr("journal vidé ({size})", size=human_size(privacy.erase_file(log_path(), backups=2))))
+        self.erased = True
+        self.result.setText(f"{plural(n, 'ligne supprimée', 'lignes supprimées')}" + ("  ·  " + "  ·  ".join(extra) if extra else ""))
         self.refresh()
 
     def refresh(self):
         try:
             st = history.db_stats()
         except (sqlite3.Error, OSError) as e:
-            self.info.setText(f"Historique indisponible : {e}"); return
-        oldest = f"  (le plus ancien : {when(st['oldest_scan'])})" if st["oldest_scan"] else ""
-        self.info.setText(f"Fichier : {history.PATH}\nTaille : {human_size(st['size'])}\nAppareils connus : {st['devices']}\n"
-                          f"Scans conservés : {st['scans']}{oldest}\nÉvénements du journal : {st['events']}")
+            self.info.setText(tr("Historique indisponible : {e}", e=e)); return
+        oldest = tr("  (le plus ancien : {when})", when=when(st['oldest_scan'])) if st["oldest_scan"] else ""
+        self.info.setText(tr("Fichier : {path}\nTaille : {human_size}\nAppareils connus : {devices}\nScans conservés : "
+                             "{scans}{oldest}\nÉvénements du journal : {events}", path=history.PATH, human_size=human_size(st['size']), devices=st['devices'], scans=st['scans'], oldest=oldest, events=st['events']))
 
     def purge(self):
         try:
             r = history.purge(self.sp_scans.value(), self.sp_events.value())
         except (sqlite3.Error, OSError) as e:
-            self.result.setText(f"Purge impossible : {e}"); return
-        self.result.setText(f"{plural(r['scans'], 'scan supprimé', 'scans supprimés')}, {plural(r['events'], 'événement supprimé', 'événements supprimés')}.")
+            self.result.setText(tr("Purge impossible : {e}", e=e)); return
+        self.result.setText(tr("{scans}, {events}.", scans=plural(r['scans'], 'scan supprimé', 'scans supprimés'), events=plural(r['events'], 'événement supprimé', 'événements supprimés')))
         self.refresh()
 
     def values(self):
         return self.sp_scans.value(), self.sp_events.value()
+
+
+class AlertWorker(QThread):
+    """Envoie les alertes en arrière-plan (un serveur lent ne doit jamais figer la fenêtre)."""
+    finished_with = pyqtSignal(list)
+
+    def __init__(self, cfg, events, parent=None, webhook_url=None, smtp_password=None):
+        super().__init__(parent)
+        self.cfg, self.events, self.webhook_url, self.smtp_password = cfg, events, webhook_url, smtp_password
+
+    def run(self):
+        try:
+            res = alerts.dispatch(self.cfg, self.events, webhook_url=self.webhook_url, smtp_password=self.smtp_password)
+        except Exception as e:  # noqa: BLE001 - jamais d'exception qui remonte d'un thread d'alerte
+            log.exception("Envoi des alertes")
+            res = [("alertes", False, str(e))]
+        self.finished_with.emit(res)
+
+
+class AlertsDialog(QDialog):
+    """Réglages des alertes : événements, webhook, e-mail. Les secrets vont dans le trousseau, pas dans le fichier de réglages."""
+
+    FORMAT_LABELS = (("generic", N_("JSON générique (Home Assistant, scripts…)")), ("discord", "Discord"), ("slack", "Slack"), ("ntfy", "ntfy"))
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(tr("Alertes : webhook et e-mail"))
+        self.setMinimumWidth(600)
+        cfg = alerts.load()
+        self.test_worker = None
+        lay = QVBoxLayout(self); lay.setContentsMargins(20, 20, 20, 16); lay.setSpacing(10)
+        self.enabled = QCheckBox(tr("Activer les alertes")); self.enabled.setChecked(cfg["enabled"])
+        lay.addWidget(self.enabled)
+        ev = cfg["events"]
+        self.ev_new = QCheckBox(tr("Nouvel appareil sur le réseau")); self.ev_new.setChecked(ev["new_device"])
+        self.ev_exp = QCheckBox(tr("Nouvelle exposition de sécurité, à partir de la gravité :")); self.ev_exp.setChecked(ev["new_exposure"])
+        self.sev = QComboBox()
+        for s in ("moyen", "élevé", "critique"):
+            self.sev.addItem(security.LABELS[s], s)
+        self.sev.setCurrentIndex(max(self.sev.findData(ev["exposure_min"]), 0))
+        self.ev_off = QCheckBox(tr("Appareil de confiance passé hors ligne")); self.ev_off.setChecked(ev["trusted_offline"])
+        self.auto_only = QCheckBox(tr("Seulement pour les scans automatiques (pas quand je scanne moi-même)")); self.auto_only.setChecked(ev["auto_only"])
+        row = QHBoxLayout(); row.addWidget(self.ev_exp); row.addWidget(self.sev); row.addStretch(1)
+        for w in (self.ev_new,):
+            lay.addWidget(w)
+        lay.addLayout(row); lay.addWidget(self.ev_off); lay.addWidget(self.auto_only)
+        sep = QFrame(); sep.setObjectName("sep"); lay.addWidget(sep)
+        wh = cfg["webhook"]
+        self.wh_on = QCheckBox(tr("Envoyer par webhook")); self.wh_on.setChecked(wh["enabled"])
+        self.wh_fmt = QComboBox()
+        for k, label in self.FORMAT_LABELS:
+            label = tr(label)
+            self.wh_fmt.addItem(label, k)
+        self.wh_fmt.setCurrentIndex(max(self.wh_fmt.findData(wh["format"]), 0))
+        self.wh_url = QLineEdit(); self.wh_url.setEchoMode(QLineEdit.EchoMode.Password)
+        self.wh_url.setPlaceholderText(tr("URL du webhook (déjà enregistrée : laisser vide pour la garder)") if secrets.get(alerts.SECRET_WEBHOOK) else tr("https://…"))
+        wf = QFormLayout(); wf.addRow(tr("Format"), self.wh_fmt); wf.addRow(tr("URL"), self.wh_url)
+        lay.addWidget(self.wh_on); lay.addLayout(wf)
+        em = cfg["email"]
+        self.em_on = QCheckBox(tr("Envoyer par e-mail (SMTP)")); self.em_on.setChecked(em["enabled"])
+        self.em_host = QLineEdit(em["host"]); self.em_port = QSpinBox(); self.em_port.setRange(1, 65535); self.em_port.setValue(em["port"])
+        self.em_sec = QComboBox()
+        for k, label in (("starttls", "STARTTLS (587)"), ("ssl", "SSL/TLS (465)"), ("none", tr("Aucune (réseau de confiance uniquement)"))):
+            self.em_sec.addItem(label, k)
+        self.em_sec.setCurrentIndex(max(self.em_sec.findData(em["security"]), 0))
+        self.em_user = QLineEdit(em["user"])
+        self.em_pw = QLineEdit(); self.em_pw.setEchoMode(QLineEdit.EchoMode.Password)
+        self.em_pw.setPlaceholderText(tr("Mot de passe (déjà enregistré : laisser vide pour le garder)") if secrets.get(alerts.SECRET_SMTP) else tr("Mot de passe"))
+        self.em_from = QLineEdit(em["from"]); self.em_to = QLineEdit(", ".join(em["to"]))
+        ef = QFormLayout()
+        ef.addRow(tr("Serveur"), self.em_host); ef.addRow(tr("Port"), self.em_port); ef.addRow(tr("Sécurité"), self.em_sec); ef.addRow(tr("Identifiant"), self.em_user)
+        ef.addRow(tr("Mot de passe"), self.em_pw); ef.addRow(tr("Expéditeur"), self.em_from); ef.addRow(tr("Destinataire(s)"), self.em_to)
+        lay.addWidget(self.em_on); lay.addLayout(ef)
+        note = QLabel(tr("Secrets (URL du webhook, mot de passe) : {backend}, jamais dans le fichier de réglages. Les "
+                         "messages contiennent les noms et adresses de vos appareils : ne les envoyez qu'à un service de "
+                         "confiance.", backend=secrets.backend()))
+        note.setWordWrap(True); note.setObjectName("muted")
+        self.result = QLabel(""); self.result.setWordWrap(True); self.result.setTextFormat(Qt.TextFormat.PlainText)
+        test = QPushButton(tr("Envoyer un test")); test.clicked.connect(self.send_test)
+        clear = QPushButton(tr("Effacer les secrets")); clear.clicked.connect(self.clear_secrets)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText(tr("Enregistrer")); buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(tr("Annuler"))
+        buttons.accepted.connect(self.accept); buttons.rejected.connect(self.reject)
+        brow = QHBoxLayout(); brow.addWidget(test); brow.addWidget(clear); brow.addStretch(1); brow.addWidget(buttons)
+        lay.addWidget(note); lay.addWidget(self.result); lay.addLayout(brow)
+
+    def collect(self):
+        """Réglages saisis (validés). Lève alerts.AlertError si une adresse est invalide."""
+        return alerts.validate({"enabled": self.enabled.isChecked(),
+                                "events": {"new_device": self.ev_new.isChecked(), "new_exposure": self.ev_exp.isChecked(), "exposure_min": self.sev.currentData(),
+                                           "trusted_offline": self.ev_off.isChecked(), "auto_only": self.auto_only.isChecked()},
+                                "webhook": {"enabled": self.wh_on.isChecked(), "format": self.wh_fmt.currentData()},
+                                "email": {"enabled": self.em_on.isChecked(), "host": self.em_host.text(), "port": self.em_port.value(),
+                                          "security": self.em_sec.currentData(), "user": self.em_user.text(), "from": self.em_from.text(), "to": self.em_to.text()}})
+
+    def send_test(self):
+        try:
+            cfg = self.collect()
+        except alerts.AlertError as e:
+            self.result.setText(str(e)); return
+        cfg["webhook"]["enabled"] = cfg["webhook"]["enabled"] or bool(self.wh_url.text().strip())
+        if not (cfg["webhook"]["enabled"] or cfg["email"]["enabled"]):
+            self.result.setText(tr("Activez le webhook ou l'e-mail pour envoyer un test.")); return
+        self.result.setText(tr("Envoi du test…"))
+        self.test_worker = AlertWorker(cfg, alerts.test_message(), self, webhook_url=self.wh_url.text().strip() or None,
+                                       smtp_password=self.em_pw.text() or None)
+        self.test_worker.finished_with.connect(self.show_result)
+        self.test_worker.start()
+
+    def show_result(self, results):
+        self.result.setText("\n".join(f"{c} : " + (tr("envoyé") if ok else tr("échec ({err})", err=err)) for c, ok, err in results) or tr("Aucun canal actif."))
+
+    def clear_secrets(self):
+        secrets.delete(alerts.SECRET_WEBHOOK); secrets.delete(alerts.SECRET_SMTP)
+        self.wh_url.clear(); self.em_pw.clear()
+        self.wh_url.setPlaceholderText(tr("https://…")); self.em_pw.setPlaceholderText(tr("Mot de passe"))
+        self.result.setText(tr("Secrets effacés."))
+
+    def accept(self):
+        try:
+            cfg = self.collect()
+        except alerts.AlertError as e:
+            self.result.setText(str(e)); return
+        try:
+            alerts.save(cfg)
+            if self.wh_url.text().strip():
+                secrets.set(alerts.SECRET_WEBHOOK, self.wh_url.text().strip())
+            if self.em_pw.text():
+                secrets.set(alerts.SECRET_SMTP, self.em_pw.text())
+        except OSError as e:
+            self.result.setText(tr("Enregistrement impossible : {e}", e=e)); return
+        super().accept()
+
+
+class ReportScheduleDialog(QDialog):
+    """Rapport PDF produit automatiquement (tous les jours ou toutes les semaines) dans un dossier."""
+
+    def __init__(self, cfg, parent=None):
+        super().__init__(parent)
+        self.main, self.generated = parent, False
+        self.setWindowTitle(tr("Rapports planifiés"))
+        self.setMinimumWidth(540)
+        self.enabled = QCheckBox(tr("Produire un rapport PDF automatiquement")); self.enabled.setChecked(cfg["enabled"])
+        self.freq = QComboBox()
+        for k, label in schedule.LABELS.items():
+            self.freq.addItem(label, k)
+        self.freq.setCurrentIndex(max(self.freq.findData(cfg["freq"]), 0))
+        self.folder = QLineEdit(cfg["folder"])
+        browse = QPushButton(tr("Parcourir…")); browse.clicked.connect(self.browse)
+        frow = QHBoxLayout(); frow.addWidget(self.folder, 1); frow.addWidget(browse)
+        self.keep = QSpinBox(); self.keep.setRange(1, schedule.MAX_KEEP); self.keep.setValue(cfg["keep"]); self.keep.setSuffix(tr(" rapports"))
+        form = QFormLayout()
+        form.addRow(tr("Fréquence"), self.freq); form.addRow(tr("Dossier"), frow); form.addRow(tr("Conserver les"), self.keep)
+        last = tr("Dernier rapport : {when}", when=when(cfg['last'])) if cfg["last"] else tr("Aucun rapport produit pour l'instant.")
+        note = QLabel(last + "\n" + tr("Un rapport n'est produit que si Panther est ouvert et qu'un scan a eu lieu (activez le scan automatique "
+                                      "pour qu'il soit à jour). Seuls les fichiers « rapport-panther-….pdf » de ce dossier sont renouvelés : "
+                                      "rien d'autre n'y est supprimé."))
+        note.setWordWrap(True); note.setObjectName("muted")
+        self.result = QLabel(""); self.result.setWordWrap(True); self.result.setTextFormat(Qt.TextFormat.PlainText)
+        now_btn = QPushButton(tr("Générer un rapport maintenant")); now_btn.clicked.connect(self.generate_now)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText(tr("Enregistrer")); buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(tr("Annuler"))
+        buttons.accepted.connect(self.accept); buttons.rejected.connect(self.reject)
+        row = QHBoxLayout(); row.addWidget(now_btn); row.addStretch(1); row.addWidget(buttons)
+        lay = QVBoxLayout(self); lay.setContentsMargins(20, 20, 20, 16); lay.setSpacing(12)
+        lay.addWidget(self.enabled); lay.addLayout(form); lay.addWidget(note); lay.addWidget(self.result); lay.addLayout(row)
+
+    def browse(self):
+        d = QFileDialog.getExistingDirectory(self, tr("Dossier des rapports"), self.folder.text() or os.path.expanduser("~"))
+        if d:
+            self.folder.setText(d)
+
+    def values(self):
+        return self.enabled.isChecked(), self.freq.currentData(), self.folder.text().strip(), self.keep.value()
+
+    def generate_now(self):
+        if not self.main.devices:
+            self.result.setText(tr("Aucun résultat : lancez d'abord un scan.")); return
+        self.main.save_report_settings(*self.values())  # le rapport utilise les réglages affichés
+        try:
+            path = self.main.generate_scheduled_report()
+        except OSError as e:
+            self.result.setText(tr("Impossible : {e}", e=e)); return
+        self.generated = True
+        self.result.setText(tr("Rapport enregistré : {path}", path=path))
+
+
+class OuiWorker(QThread):
+    """Télécharge et convertit la base des fabricants sans figer la fenêtre."""
+    done = pyqtSignal(int)
+    failed = pyqtSignal(str)
+
+    def run(self):
+        try:
+            self.done.emit(ouiupdate.update())
+        except ouiupdate.UpdateError as e:
+            self.failed.emit(str(e))
+        except Exception as e:  # noqa: BLE001
+            log.exception("Mise à jour de la base des fabricants")
+            self.failed.emit(str(e))
 
 
 class Detector(QThread):
@@ -740,41 +1076,41 @@ class NetworksDialog(QDialog):
 
     def __init__(self, local_cidr, selected, snmp_sources, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Réseaux à scanner")
+        self.setWindowTitle(tr("Réseaux à scanner"))
         self.setMinimumSize(580, 640)
         self.local, self.detector = local_cidr, None
-        intro = QLabel("Le réseau local est toujours scanné. Cochez d'autres plages (autres VLAN, sous-réseaux "
-                       "routés) ou ajoutez-les à la main. Panther refuse les plages publiques.")
+        intro = QLabel(tr("Le réseau local est toujours scanné. Cochez d'autres plages (autres VLAN, sous-réseaux routés) ou "
+                          "ajoutez-les à la main. Panther refuse les plages publiques."))
         intro.setWordWrap(True); intro.setObjectName("muted")
         self.list = QListWidget()
-        self.edit = QLineEdit(); self.edit.setPlaceholderText("Ajouter une plage, par exemple 192.168.20.0/24")
+        self.edit = QLineEdit(); self.edit.setPlaceholderText(tr("Ajouter une plage, par exemple 192.168.20.0/24"))
         self.edit.returnPressed.connect(self.add_custom)
-        add = QPushButton("Ajouter"); add.clicked.connect(self.add_custom)
+        add = QPushButton(tr("Ajouter")); add.clicked.connect(self.add_custom)
         row = QHBoxLayout(); row.addWidget(self.edit, 1); row.addWidget(add)
         self.msg = QLabel(""); self.msg.setObjectName("muted"); self.msg.setWordWrap(True)
-        self.detect = QPushButton("Détecter les réseaux joignables"); self.detect.clicked.connect(self.start_detect)
-        note = QLabel("La détection sonde les passerelles .1 et .254 des plages 192.168.X.0/24 et 10.0.X.0/24 "
-                      "(environ 1 000 adresses). Au-delà d'un routeur, les adresses MAC ne sont pas visibles. "
-                      "Ne cochez que des réseaux dont vous êtes responsable.")
+        self.detect = QPushButton(tr("Détecter les réseaux joignables")); self.detect.clicked.connect(self.start_detect)
+        note = QLabel(tr("La détection sonde les passerelles .1 et .254 des plages 192.168.X.0/24 et 10.0.X.0/24 (environ 1 "
+                         "000 adresses). Au-delà d'un routeur, les adresses MAC ne sont pas visibles. Ne cochez que des "
+                         "réseaux dont vous êtes responsable."))
         note.setWordWrap(True); note.setObjectName("muted")
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Enregistrer")
-        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("Annuler")
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText(tr("Enregistrer"))
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(tr("Annuler"))
         buttons.accepted.connect(self.accept); buttons.rejected.connect(self.reject)
         lay = QVBoxLayout(self); lay.setContentsMargins(20, 20, 20, 16); lay.setSpacing(12)
         for w in (intro, self.list):
             lay.addWidget(w)
         lay.addLayout(row); lay.addWidget(self.msg); lay.addWidget(self.detect); lay.addWidget(note)
         sep = QFrame(); sep.setObjectName("sep"); lay.addWidget(sep)
-        snmp_title = QLabel("SNMP (optionnel, lecture seule)"); snmp_title.setObjectName("section")
-        snmp_note = QLabel("Interroge un routeur ou un switch que vous désignez : sa table ARP donne les adresses MAC "
-                           "et les appareils des autres VLAN, sa table de ports donne le port et le VLAN de chaque appareil.")
+        snmp_title = QLabel(tr("SNMP (optionnel, lecture seule)")); snmp_title.setObjectName("section")
+        snmp_note = QLabel(tr("Interroge un routeur ou un switch que vous désignez : sa table ARP donne les adresses MAC et les "
+                              "appareils des autres VLAN, sa table de ports donne le port et le VLAN de chaque appareil."))
         snmp_note.setWordWrap(True); snmp_note.setObjectName("muted")
-        self.snmp_host = QLineEdit(); self.snmp_host.setPlaceholderText("IP du routeur / switch")
-        self.snmp_comm = QLineEdit(); self.snmp_comm.setPlaceholderText("Communauté (lecture)")
+        self.snmp_host = QLineEdit(); self.snmp_host.setPlaceholderText(tr("IP du routeur / switch"))
+        self.snmp_comm = QLineEdit(); self.snmp_comm.setPlaceholderText(tr("Communauté (lecture)"))
         self.snmp_comm.setEchoMode(QLineEdit.EchoMode.Password)
-        snmp_add = QPushButton("Ajouter"); snmp_add.clicked.connect(self.add_snmp)
-        snmp_del = QPushButton("Retirer"); snmp_del.clicked.connect(self.remove_snmp)
+        snmp_add = QPushButton(tr("Ajouter")); snmp_add.clicked.connect(self.add_snmp)
+        snmp_del = QPushButton(tr("Retirer")); snmp_del.clicked.connect(self.remove_snmp)
         srow = QHBoxLayout(); srow.addWidget(self.snmp_host, 1); srow.addWidget(self.snmp_comm, 1); srow.addWidget(snmp_add); srow.addWidget(snmp_del)
         self.snmp_list = QListWidget(); self.snmp_list.setMaximumHeight(84)
         self.sources = []
@@ -790,17 +1126,17 @@ class NetworksDialog(QDialog):
 
     def _add_snmp_item(self, src):
         self.sources.append(src)
-        self.snmp_list.addItem(f"{src['host']}  ·  communauté {'•' * min(len(src['community']), 8)}")
+        self.snmp_list.addItem(tr("{host}  ·  communauté {dots}", host=src['host'], dots='•' * min(len(src['community']), 8)))
 
     def add_snmp(self):
         host, comm = self.snmp_host.text().strip(), self.snmp_comm.text().strip()
         try:
             if not ipaddress.ip_address(host).is_private:
-                raise ValueError("Seules les adresses privées sont acceptées.")
+                raise ValueError(tr("Seules les adresses privées sont acceptées."))
         except ValueError as e:
-            self.msg.setText(str(e) if "privées" in str(e) else f"« {host} » n'est pas une adresse IP valide."); return
+            self.msg.setText(str(e) if tr("Seules les adresses privées sont acceptées.") in str(e) else tr("« {host} » n'est pas une adresse IP valide.", host=host)); return
         if not comm:
-            self.msg.setText("Indiquez la communauté SNMP en lecture seule."); return
+            self.msg.setText(tr("Indiquez la communauté SNMP en lecture seule.")); return
         self._add_snmp_item({"host": host, "community": comm})
         self.snmp_host.clear(); self.snmp_comm.clear(); self.msg.setText("")
 
@@ -819,8 +1155,8 @@ class NetworksDialog(QDialog):
         if net["cidr"] in self.cidrs():
             return
         locked = net.get("kind") == "local"
-        label = networks.describe(net) + {"local": "  (réseau local)", "découvert": "  (détecté)",
-                                           "manuel": "  (ajouté)", "interface": "  (autre interface)"}.get(net.get("kind"), "")
+        label = networks.describe(net) + {"local": tr("  (réseau local)"), "découvert": tr("  (détecté)"),
+                                           "manuel": tr("  (ajouté)"), "interface": tr("  (autre interface)")}.get(net.get("kind"), "")
         it = QListWidgetItem(label)
         it.setData(Qt.ItemDataRole.UserRole, net["cidr"])
         it.setFlags(Qt.ItemFlag.ItemIsEnabled if locked else Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsUserCheckable)
@@ -836,7 +1172,7 @@ class NetworksDialog(QDialog):
         self.edit.clear(); self.msg.setText("")
 
     def start_detect(self):
-        self.detect.setEnabled(False); self.detect.setText("Détection en cours…")
+        self.detect.setEnabled(False); self.detect.setText(tr("Détection en cours…"))
         self.detector = Detector([c for c in [self.local] if c], self)
         self.detector.found.connect(self.on_detected)
         self.detector.start()
@@ -844,9 +1180,9 @@ class NetworksDialog(QDialog):
     def on_detected(self, found):
         for n in found:
             self.add_item(n, False)  # jamais coché d'office : à l'utilisateur de décider
-        self.msg.setText(f"{len(found)} réseau(x) joignable(s) trouvé(s)." if found else
-                         "Aucun autre réseau joignable détecté (routage ou pare-feu entre les VLAN ?).")
-        self.detect.setEnabled(True); self.detect.setText("Détecter les réseaux joignables")
+        self.msg.setText(tr("{found_count} réseau(x) joignable(s) trouvé(s).", found_count=len(found)) if found else
+                         tr("Aucun autre réseau joignable détecté (routage ou pare-feu entre les VLAN ?)."))
+        self.detect.setEnabled(True); self.detect.setText(tr("Détecter les réseaux joignables"))
 
     def reject(self):
         if self.detector and self.detector.isRunning():
@@ -916,12 +1252,12 @@ class Node(QGraphicsItem):
         self.setFlags(flags)
         self._press = None
         self.setAcceptHoverEvents(True)
-        self.setToolTip(f"{dev['hostname'] or dev['ip']}\n{dev['ip']}  ·  {LABELS.get(dev['type'], '')}"
-                        + (f"\n{dev['mac']}" if dev["mac"] else "")
-                        + (f"\nSwitch : {dev.get('switch', '')}  ·  {dev['switch_port']}" if dev.get("switch_port") else ""))
+        self.setToolTip(tip(f"{dev['hostname'] or dev['ip']}\n{dev['ip']}  ·  {LABELS.get(dev['type'], '')}"
+                            + (f"\n{dev['mac']}" if dev["mac"] else "")
+                            + (tr("\nSwitch : {switch}  ·  {port}", switch=dev.get('switch', ''), port=dev['switch_port']) if dev.get("switch_port") else "")))
 
     def boundingRect(self):
-        return QRectF(-90, -self.r - 8, 180, 2 * self.r + 56)
+        return QRectF(-110, -self.r - 8, 220, 2 * self.r + 26 + fs(34))
 
     def paint(self, p, *_):
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -960,14 +1296,14 @@ class Node(QGraphicsItem):
         if d.get("new"):
             p.setPen(Qt.PenStyle.NoPen); p.setBrush(QColor(T["warn"]))
             p.drawEllipse(QPointF(-r * 0.72, -r * 0.72), 5.5, 5.5)
-        f = QFont(); f.setPointSizeF(9); p.setFont(f)
-        name = QFontMetrics(f).elidedText(d["hostname"] or d["ip"], Qt.TextElideMode.ElideRight, 170)
+        f = QFont(); f.setPointSizeF(fs(9)); p.setFont(f)
+        name = QFontMetrics(f).elidedText(d["hostname"] or d["ip"], Qt.TextElideMode.ElideRight, 200)
         p.setPen(QColor(T["fg"]))
-        p.drawText(QRectF(-90, r + 5, 180, 16), Qt.AlignmentFlag.AlignCenter, name)
-        m = QFont("monospace"); m.setPointSizeF(8); p.setFont(m)
+        p.drawText(QRectF(-105, r + 5, 210, fs(16)), Qt.AlignmentFlag.AlignCenter, name)
+        m = QFont("monospace"); m.setPointSizeF(fs(8)); p.setFont(m)
         p.setPen(QColor(T["mut"]))
-        p.drawText(QRectF(-90, r + 21, 180, 14), Qt.AlignmentFlag.AlignCenter,
-                   d.get("sub", "") if d.get("virtual") else "cette machine" if d["is_self"] else f"hors ligne · vu {seen_label(d.get('last_seen'))}" if offline else d["ip"])
+        p.drawText(QRectF(-105, r + 5 + fs(16), 210, fs(14)), Qt.AlignmentFlag.AlignCenter,
+                   d.get("sub", "") if d.get("virtual") else tr("cette machine") if d["is_self"] else tr("hors ligne · vu {seen}", seen=seen_label(d.get('last_seen'))) if offline else d["ip"])
 
     def itemChange(self, change, value):
         if change == QGraphicsItem.GraphicsItemChange.ItemPositionHasChanged:
@@ -1010,7 +1346,12 @@ class MapView(QGraphicsView):
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setFrameShape(QFrame.Shape.NoFrame)
         self.legend, self.show_legend = [], True
+        self.show_minimap, self._mm_drag = True, False
         self.fit_cb, self.auto_fit = None, False
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setAccessibleName(tr("Carte du réseau"))
+        self.setAccessibleDescription(tr("Flèches : changer d'appareil. Maj + flèches : ajouter à la sélection. + et − : zoom. "
+                                         "Entrée : modifier l'appareil. Échap : tout désélectionner. L'onglet Appareils liste les mêmes appareils."))
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
@@ -1029,52 +1370,334 @@ class MapView(QGraphicsView):
         if self.auto_fit and self.fit_cb:
             self.fit_cb()  # la fenêtre change de taille : on garde la carte centrée
 
+    # ---- mini-carte : toute la scène en petit, avec le cadre de ce qui est visible ; clic ou glisser pour se déplacer
+    MM_W, MM_H = 200, 130
+
+    def minimap_rect(self):
+        return QRectF(self.viewport().width() - self.MM_W - 14, self.viewport().height() - self.MM_H - 14, self.MM_W, self.MM_H)
+
+    def minimap_scale(self):
+        """(rectangle de scène couvert, échelle, origine x, origine y) ou None s'il n'y a rien à montrer."""
+        whole = self.scene().itemsBoundingRect()
+        if whole.width() <= 0 and whole.height() <= 0:
+            return None
+        scene_rect = whole.adjusted(-50, -50, 50, 50)
+        box = self.minimap_rect().adjusted(6, 6, -6, -6)
+        k = min(box.width() / scene_rect.width(), box.height() / scene_rect.height())
+        ox = box.left() + (box.width() - scene_rect.width() * k) / 2
+        oy = box.top() + (box.height() - scene_rect.height() * k) / 2
+        return scene_rect, k, ox, oy
+
+    def minimap_visible(self):
+        """La mini-carte n'apparaît que si elle sert : quand la carte entière n'est pas déjà à l'écran."""
+        if not self.show_minimap or not self.scene().items():
+            return False
+        whole = self.scene().itemsBoundingRect()
+        return not self.mapToScene(self.viewport().rect()).boundingRect().contains(whole)
+
+    def _mm_move(self, pos):
+        m = self.minimap_scale()
+        if m:
+            scene_rect, k, ox, oy = m
+            self.centerOn(QPointF(scene_rect.left() + (pos.x() - ox) / k, scene_rect.top() + (pos.y() - oy) / k))
+
     def mousePressEvent(self, e):
         self.auto_fit = False
+        pos = e.position()
+        if e.button() == Qt.MouseButton.LeftButton and self.minimap_visible() and self.minimap_rect().contains(pos):
+            self._mm_drag = True
+            self._mm_move(pos)
+            return
+        if (e.button() == Qt.MouseButton.LeftButton and e.modifiers() & Qt.KeyboardModifier.ShiftModifier
+                and self.itemAt(pos.toPoint()) is None):
+            self.setDragMode(QGraphicsView.DragMode.RubberBandDrag)  # Maj + glisser dans le vide : sélection au lasso
         super().mousePressEvent(e)
+
+    def mouseMoveEvent(self, e):
+        if self._mm_drag:
+            self._mm_move(e.position())
+            return
+        super().mouseMoveEvent(e)
+
+    def mouseReleaseEvent(self, e):
+        self._mm_drag = False
+        super().mouseReleaseEvent(e)
+        self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
 
     def wheelEvent(self, e):
         self.auto_fit = False
         z = 1.12 if e.angleDelta().y() > 0 else 1 / 1.12
         self.scale(z, z)
 
+    # ---- clavier : la carte se parcourt sans souris
+    def device_nodes(self):
+        return [i for i in self.scene().items() if isinstance(i, Node) and not i.dev.get("virtual")]
+
+    def neighbour_node(self, node, dx, dy):
+        """Nœud le plus proche dans la direction (dx, dy) : dans un cône de ±60°, sinon aucun."""
+        best, best_score = None, None
+        for n in self.device_nodes():
+            if n is node:
+                continue
+            vx, vy = n.pos().x() - node.pos().x(), n.pos().y() - node.pos().y()
+            dist = math.hypot(vx, vy)
+            along = (vx * dx + vy * dy) / dist if dist else 0
+            if along < 0.5:                                            # cos 60° : hors du cône
+                continue
+            score = dist * (2 - along)                                 # plus proche et mieux aligné d'abord
+            if best_score is None or score < best_score:
+                best, best_score = n, score
+        return best
+
+    def move_selection(self, dx, dy, extend=False):
+        nodes = [n for n in self.device_nodes() if n.isSelected()]
+        if not nodes:                                                  # rien de sélectionné : on part du nœud le plus proche du centre
+            centre = self.mapToScene(self.viewport().rect().center())
+            cands = self.device_nodes()
+            target = min(cands, key=lambda n: math.hypot(n.pos().x() - centre.x(), n.pos().y() - centre.y()), default=None)
+        else:
+            target = self.neighbour_node(nodes[-1], dx, dy)
+        if target is None:
+            return
+        if not extend:
+            self.scene().clearSelection()
+        target.setSelected(True)
+        self.ensureVisible(target, 80, 80)
+
+    def keyPressEvent(self, e):
+        k, mods = e.key(), e.modifiers()
+        arrows = {Qt.Key.Key_Left: (-1, 0), Qt.Key.Key_Right: (1, 0), Qt.Key.Key_Up: (0, -1), Qt.Key.Key_Down: (0, 1)}
+        selected = [n for n in self.device_nodes() if n.isSelected()]
+        if k in arrows:
+            self.move_selection(*arrows[k], extend=bool(mods & Qt.KeyboardModifier.ShiftModifier))
+        elif k in (Qt.Key.Key_Plus, Qt.Key.Key_Equal):
+            self.auto_fit = False; self.scale(1.2, 1.2)
+        elif k in (Qt.Key.Key_Minus, Qt.Key.Key_Underscore):
+            self.auto_fit = False; self.scale(1 / 1.2, 1 / 1.2)
+        elif k == Qt.Key.Key_Escape:
+            self.scene().clearSelection()
+        elif k in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and len(selected) == 1 and selected[0].edit_cb:
+            selected[0].edit_cb(selected[0].dev)
+        elif k == Qt.Key.Key_A and mods & Qt.KeyboardModifier.ControlModifier:
+            for n in self.device_nodes():
+                n.setSelected(True)
+        else:
+            super().keyPressEvent(e)
+            return
+        e.accept()
+
+    def paint_minimap(self, p):
+        m = self.minimap_scale()
+        if not m:
+            return
+        scene_rect, k, ox, oy = m
+        box = self.minimap_rect()
+        p.setBrush(QColor(T["panel"])); p.setPen(QPen(QColor(T["border"]), 1))
+        p.drawRoundedRect(box, 8, 8)
+        p.setClipRect(box.adjusted(2, 2, -2, -2))
+        to_mm = lambda pt: QPointF(ox + (pt.x() - scene_rect.left()) * k, oy + (pt.y() - scene_rect.top()) * k)
+        p.setPen(Qt.PenStyle.NoPen)
+        for it in self.scene().items():
+            if isinstance(it, Node):
+                p.setBrush(QColor(T["mut"] if it.dev.get("virtual") else type_color(it.dev["type"])))
+                p.drawEllipse(to_mm(it.pos()), 2.6 if it.isSelected() else 2.0, 2.6 if it.isSelected() else 2.0)
+        vis = self.mapToScene(self.viewport().rect()).boundingRect()
+        a, b = to_mm(vis.topLeft()), to_mm(vis.bottomRight())
+        frame = QRectF(a, b).intersected(box.adjusted(3, 3, -3, -3))
+        fill = QColor(T["acc"]); fill.setAlpha(40)
+        p.setBrush(fill); p.setPen(QPen(QColor(T["acc"]), 1.4))
+        p.drawRect(frame)
+        p.setClipping(False)
+
     def paintEvent(self, e):
         super().paintEvent(e)
+        if self.hasFocus():                                            # focus clavier visible
+            q = QPainter(self.viewport())
+            q.setPen(QPen(QColor(T["acc"]), 3)); q.setBrush(Qt.BrushStyle.NoBrush)
+            q.drawRect(self.viewport().rect().adjusted(1, 1, -2, -2))
+            q.end()
+        if self.minimap_visible():
+            q = QPainter(self.viewport())
+            q.setRenderHint(QPainter.RenderHint.Antialiasing)
+            self.paint_minimap(q)
+            q.end()
         if not self.legend or not self.show_legend:
             return
         p = QPainter(self.viewport())
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        f = QFont(); f.setPointSizeF(8.5); p.setFont(f)
+        f = QFont(); f.setPointSizeF(fs(8.5)); p.setFont(f)
         rows = self.legend
         cols = 2 if len(rows) > 7 else 1          # légende longue : deux colonnes pour ne pas cacher la carte
         per = -(-len(rows) // cols)
-        w, h = 176 * cols, 12 + 20 * per
+        rh, cw = int(20 * FONT_SCALE), int(176 * FONT_SCALE)   # lignes et colonnes suivent la taille du texte
+        w, h = cw * cols, 12 + rh * per
         box = QRectF(14, self.viewport().height() - h - 14, w, h)
         p.setBrush(QColor(T["panel"])); p.setPen(QPen(QColor(T["border"]), 1))
         p.drawRoundedRect(box, 8, 8)
         for i, (kind, n) in enumerate(rows):
-            x0, y = box.left() + (i // per) * 176, box.top() + 6 + (i % per) * 20
-            p.drawPixmap(int(x0 + 10), int(y + 2), type_pixmap(kind, 16))
+            x0, y = box.left() + (i // per) * cw, box.top() + 6 + (i % per) * rh
+            p.drawPixmap(int(x0 + 10), int(y + (rh - 16) / 2), type_pixmap(kind, 16))
             p.setPen(QColor(T["fg"]))
-            p.drawText(QRectF(x0 + 34, y, 120, 20), Qt.AlignmentFlag.AlignVCenter, LABELS[kind])
+            p.drawText(QRectF(x0 + 34, y, cw - 56, rh), Qt.AlignmentFlag.AlignVCenter, LABELS[kind])
             p.setPen(QColor(T["mut"]))
-            p.drawText(QRectF(x0 + 136, y, 30, 20), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight, str(n))
+            p.drawText(QRectF(x0 + cw - 40, y, 30, rh), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight, str(n))
+
+
+class WelcomeWizard(QDialog):
+    """Assistant de premier lancement : langue, usage responsable, apparence, façon de scanner. Rien n'est lancé : il ne fait que
+    régler les options (modifiables ensuite dans les menus). Aide → « Assistant de premier lancement… » le rouvre."""
+
+    AUTO_CHOICES = (0, 15, 30, 60)
+
+    def __init__(self, settings=None, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Panther")
+        self.setMinimumSize(560, 430)
+        self.settings = settings
+        self.lang = i18n.language()
+        self.stack = QStackedWidget()
+        self.back_btn, self.next_btn, self.skip_btn = QPushButton(), QPushButton(), QPushButton()
+        self.back_btn.clicked.connect(lambda: self.go(self.stack.currentIndex() - 1))
+        self.next_btn.clicked.connect(self.on_next)
+        self.skip_btn.clicked.connect(self.reject)
+        row = QHBoxLayout(); row.addWidget(self.skip_btn); row.addStretch(1); row.addWidget(self.back_btn); row.addWidget(self.next_btn)
+        lay = QVBoxLayout(self); lay.setContentsMargins(24, 22, 24, 18); lay.setSpacing(14)
+        self.step = QLabel(); self.step.setObjectName("muted")
+        lay.addWidget(self.step); lay.addWidget(self.stack, 1); lay.addLayout(row)
+        self.build_language_page()
+        self.build_pages()
+        self.go(0)
+
+    # ---- pages
+    def page(self, title, *widgets):
+        w = QWidget(); l = QVBoxLayout(w); l.setContentsMargins(0, 0, 0, 0); l.setSpacing(12)
+        t = QLabel(title); t.setObjectName("title"); t.setWordWrap(True); l.addWidget(t)
+        for x in widgets:
+            l.addWidget(x) if isinstance(x, QWidget) else l.addLayout(x)
+        l.addStretch(1)
+        return w
+
+    @staticmethod
+    def check(text):
+        """Case à cocher dont le texte passe à la ligne (QCheckBox ne le fait pas) ; cliquer le texte coche la case. -> (case, ligne)."""
+        box = QCheckBox()
+        lab = QLabel(text); lab.setWordWrap(True); lab.setTextFormat(Qt.TextFormat.PlainText)
+        lab.mousePressEvent = lambda _e: box.toggle()
+        row = QWidget(); l = QHBoxLayout(row); l.setContentsMargins(0, 0, 0, 0); l.setSpacing(8)
+        l.addWidget(box, 0, Qt.AlignmentFlag.AlignTop); l.addWidget(lab, 1)
+        box.setAccessibleName(text)  # lecteur d'écran : le texte est porté par la case
+        return box, row
+
+    @staticmethod
+    def note(text, muted=True):
+        lab = QLabel(text); lab.setWordWrap(True); lab.setTextFormat(Qt.TextFormat.PlainText)
+        if muted:
+            lab.setObjectName("muted")
+        return lab
+
+    def build_language_page(self):
+        """Première page : bilingue, car la langue n'est pas encore choisie."""
+        self.lang_buttons = {}
+        row = QHBoxLayout()
+        for code, label in i18n.LANGUAGES.items():
+            b = QPushButton(label); b.setCheckable(True); b.setMinimumHeight(44)
+            b.clicked.connect(lambda _c, c=code: self.choose_language(c))
+            row.addWidget(b); self.lang_buttons[code] = b
+        self.lang_buttons[self.lang].setChecked(True)
+        self.stack.addWidget(self.page("Bienvenue  ·  Welcome", self.note("Choisissez votre langue  ·  Choose your language", muted=False), row))
+
+    def choose_language(self, code):
+        """Change la langue du reste de l'assistant tout de suite (les pages suivantes sont reconstruites)."""
+        self.lang = i18n.set_language(code)
+        for c, b in self.lang_buttons.items():
+            b.setChecked(c == self.lang)
+        while self.stack.count() > 1:
+            w = self.stack.widget(1); self.stack.removeWidget(w); w.deleteLater()
+        self.build_pages()
+        self.go(0)
+
+    def build_pages(self):
+        self.agree, agree_row = self.check(tr("Je n'utiliserai Panther que sur des réseaux dont j'ai la responsabilité ou l'autorisation."))
+        self.agree.stateChanged.connect(lambda _s: self.go(self.stack.currentIndex()))
+        self.stack.addWidget(self.page(tr("Un outil à utiliser avec discernement"), self.note(tr(
+            "Panther envoie des paquets aux appareils d'un réseau pour les reconnaître. Scanner un réseau qui n'est pas le vôtre peut être "
+            "illégal. Il refuse les plages publiques et n'essaie jamais de mot de passe."), muted=False), agree_row))
+        self.theme = QComboBox()
+        for mode, label in (("auto", tr("Automatique (suit le système)")), ("dark", tr("Sombre")), ("light", tr("Clair")), ("contrast", tr("Contraste élevé"))):
+            self.theme.addItem(label, mode)
+        self.size = QComboBox()
+        for key, label, _scale in TEXT_SIZES:
+            self.size.addItem(tr(label), key)
+        self.size.setCurrentIndex(1)
+        form = QFormLayout(); form.addRow(tr("Thème"), self.theme); form.addRow(tr("Taille du texte"), self.size)
+        self.stack.addWidget(self.page(tr("Apparence"), form, self.note(tr("Le thème et la taille du texte se changent à tout moment dans le menu Affichage."))))
+        self.depth = QComboBox()
+        for key, label in (("presence", tr("Présence")), ("rapide", tr("Rapide")), ("normal", tr("Normal")), ("approfondi", tr("Approfondi"))):
+            self.depth.addItem(label, key)
+        self.depth.setCurrentIndex(2)
+        self.auto = QComboBox()
+        for minutes, label in ((0, tr("Désactivé")), (15, tr("Toutes les 15 minutes")), (30, tr("Toutes les 30 minutes")), (60, tr("Toutes les heures"))):
+            self.auto.addItem(label, minutes)
+        self.passive, passive_row = self.check(tr("Écoute seule : ne rien envoyer sur le réseau"))
+        self.security, security_row = self.check(tr("Analyse de sécurité en lecture seule (ports ouverts, services sans mot de passe)"))
+        form2 = QFormLayout(); form2.addRow(tr("Profondeur"), self.depth); form2.addRow(tr("Scan automatique"), self.auto)
+        self.stack.addWidget(self.page(tr("Façon de scanner"), form2, passive_row, security_row,
+                                       self.note(tr(SECURITY_INFO)), self.note(tr("Rien n'est lancé tant que vous n'appuyez pas sur « Lancer le scan »."))))
+
+    # ---- navigation
+    def on_next(self):
+        if self.stack.currentIndex() == self.stack.count() - 1:
+            self.accept()
+        else:
+            self.go(self.stack.currentIndex() + 1)
+
+    def go(self, i):
+        i = max(0, min(i, self.stack.count() - 1))
+        self.stack.setCurrentIndex(i)
+        last = i == self.stack.count() - 1
+        self.step.setText(tr("Étape {i} sur {n}", i=i + 1, n=self.stack.count()))
+        self.back_btn.setText(tr("Précédent")); self.back_btn.setEnabled(i > 0)
+        self.next_btn.setText(tr("Terminer") if last else tr("Suivant")); self.next_btn.setObjectName("primary")
+        self.skip_btn.setText(tr("Passer"))
+        self.next_btn.setEnabled(not (i == 1 and not self.agree.isChecked()))   # la page « usage responsable » demande une case cochée
+        self.next_btn.style().unpolish(self.next_btn); self.next_btn.style().polish(self.next_btn)
+
+    def values(self):
+        return {"language": self.lang, "theme": self.theme.currentData(), "text_size": self.size.currentData(), "depth": self.depth.currentData(),
+                "auto_minutes": self.auto.currentData(), "passive": self.passive.isChecked(), "security": self.security.isChecked()}
+
+
+def first_run_needed(settings):
+    return str(settings.value("welcome_done", False)).lower() not in ("true", "1")
+
+
+def apply_welcome_settings(settings, v):
+    """Enregistre les choix de l'assistant (jamais de secret ni de réseau) ; cocher l'analyse de sécurité vaut consentement, puisque
+    son fonctionnement est expliqué sur la page."""
+    settings.setValue("language", v["language"] if v["language"] in i18n.LANGUAGES else "fr")
+    settings.setValue("theme", v["theme"] if v["theme"] in THEME_MODES else "auto")
+    settings.setValue("text_size", v["text_size"] if v["text_size"] in {k for k, _l, _s in TEXT_SIZES} else "normal")
+    settings.setValue("depth", v["depth"] if v["depth"] in ("presence", "rapide", "normal", "approfondi") else "normal")
+    settings.setValue("auto_minutes", v["auto_minutes"] if v["auto_minutes"] in WelcomeWizard.AUTO_CHOICES else 0)
+    settings.setValue("passive", bool(v["passive"]))
+    settings.setValue("security", bool(v["security"]) and not v["passive"])  # l'écoute seule n'envoie rien : pas d'analyse active
+    if v["security"] and not v["passive"]:
+        settings.setValue("security_consent", True)
+    settings.setValue("welcome_done", True)
 
 
 class Main(QMainWindow):
-    def __init__(self):
+    def __init__(self, scanner=None, demo=False):
         super().__init__()
-        self.setWindowTitle("Panther")
+        self.demo = demo  # réseau fictif : rien n'est envoyé, rien n'est écrit hors du dossier temporaire
+        self.setWindowTitle(tr("Panther — démonstration") if demo else tr("Panther"))
         self.resize(1320, 820)
-        self.scanner = Scanner()
+        self.scanner = scanner or Scanner()
         self.settings = QSettings("Panther", "Panther")
         self.devices, self.nodes, self.selected, self.network = [], {}, None, None
+        self.selected_keys = []  # sélection multiple : clés de tous les appareils sélectionnés sur la carte
         self.networks_info, self.scan_extra = [], {}
-        try:
-            raw = json.loads(self.settings.value("snmp", "[]"))
-            self.snmp = [{"host": str(x["host"]), "community": str(x["community"])} for x in raw]
-        except (ValueError, TypeError, KeyError):
-            self.snmp = []
+        self.snmp = self.load_snmp()
         try:
             self.targets = [c for c in json.loads(self.settings.value("targets", "[]")) if networks.validate_cidr(c)]
         except (ValueError, TypeError):
@@ -1093,9 +1716,14 @@ class Main(QMainWindow):
             self.last_full_scan = 0.0
         self.saved_pos = {}
         self.security_on = str(self.settings.value("security", False)).lower() in ("true", "1")
+        self.passive_on = str(self.settings.value("passive", False)).lower() in ("true", "1")
         self.security_consent = str(self.settings.value("security_consent", False)).lower() in ("true", "1")
-        self.layout_mode = self.settings.value("layout", "etoile") if self.settings.value("layout", "etoile") in ("etoile", "hierarchique") else "etoile"
+        self.layout_mode = self.settings.value("layout", "etoile") if self.settings.value("layout", "etoile") in ("etoile", "hierarchique", "types") else "etoile"
         self.show_offline = str(self.settings.value("show_offline", True)).lower() in ("true", "1")
+        mode = str(self.settings.value("theme", "auto"))
+        self.theme_mode = mode if mode in THEME_MODES else "auto"
+        size = str(self.settings.value("text_size", "normal"))
+        self.text_size = size if size in {k for k, _l, _s in TEXT_SIZES} else "normal"
 
         self._build_menu()
         self._build_toolbar()
@@ -1106,8 +1734,8 @@ class Main(QMainWindow):
         self.view = MapView(self.scene)
         self.view.fit_cb = self.fit
 
-        self.table = QTableWidget(0, 11)
-        self.table.setHorizontalHeaderLabels(["Appareil", "Adresse IP", "Adresse MAC", "Fabricant", "Type", "Système", "Services", "Réseau", "Statut", "Confiance", "Exposition"])
+        self.table = QTableWidget(0, 13)
+        self.table.setHorizontalHeaderLabels([tr("Appareil"), tr("Adresse IP"), tr("Adresse MAC"), tr("Fabricant"), tr("Type"), tr("Système"), tr("Services"), tr("Réseau"), tr("Statut"), tr("Confiance"), tr("Exposition"), tr("Groupe"), tr("Étiquettes")])
         self.table.setAlternatingRowColors(True)
         self.table.setShowGrid(False)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -1125,7 +1753,7 @@ class Main(QMainWindow):
         self.table.cellDoubleClicked.connect(lambda r, c: self.edit_device(self.table_device(r)))
 
         self.journal = QTableWidget(0, 4)
-        self.journal.setHorizontalHeaderLabels(["Date", "Appareil", "Événement", "Détail"])
+        self.journal.setHorizontalHeaderLabels([tr("Date"), tr("Appareil"), tr("Événement"), tr("Détail")])
         self.journal.setAlternatingRowColors(True); self.journal.setShowGrid(False)
         self.journal.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.journal.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -1133,13 +1761,13 @@ class Main(QMainWindow):
         self.journal.horizontalHeader().setStretchLastSection(True)
         self.journal.cellDoubleClicked.connect(self.journal_open)
         tabs = self.tabs = QTabWidget()
-        tabs.addTab(self.view, "Carte réseau")
-        tabs.addTab(self.table, "Appareils")
-        tabs.addTab(self.journal, "Journal")
+        tabs.addTab(self.view, tr("Carte réseau"))
+        tabs.addTab(self.table, tr("Appareils"))
+        tabs.addTab(self.journal, tr("Journal"))
         self.sec_label = QLabel(); self.sec_label.setWordWrap(True); self.sec_label.setObjectName("muted")
         self.sec_label.setContentsMargins(16, 12, 16, 8)
         self.sec_table = QTableWidget(0, 5)
-        self.sec_table.setHorizontalHeaderLabels(["Gravité", "Appareil", "Adresse IP", "Constat", "Recommandation"])
+        self.sec_table.setHorizontalHeaderLabels([tr("Gravité"), tr("Appareil"), tr("Adresse IP"), tr("Constat"), tr("Recommandation")])
         self.sec_table.setAlternatingRowColors(True); self.sec_table.setShowGrid(False)
         self.sec_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.sec_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -1148,7 +1776,7 @@ class Main(QMainWindow):
         self.sec_table.cellDoubleClicked.connect(self.security_open)
         sec_page = QWidget(); sl_ = QVBoxLayout(sec_page); sl_.setContentsMargins(0, 0, 0, 0); sl_.setSpacing(0)
         sl_.addWidget(self.sec_label); sl_.addWidget(self.sec_table)
-        tabs.addTab(sec_page, "Sécurité")
+        tabs.addTab(sec_page, tr("Sécurité"))
         tabs.setDocumentMode(True)
         tabs.currentChanged.connect(lambda i: self.refresh_journal() if i == 2 else self.refresh_security() if i == 3 else None)
 
@@ -1164,21 +1792,23 @@ class Main(QMainWindow):
         sep = QFrame(); sep.setObjectName("sep")
         self.form = QFormLayout(); self.form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         self.form.setHorizontalSpacing(16); self.form.setVerticalSpacing(10)
-        self.edit_btn = QPushButton("Modifier le nom / le type…")
+        self.edit_btn = QPushButton(tr("Modifier le nom / le type…"))
         self.edit_btn.clicked.connect(lambda: self.edit_device(self.current_device()))
         self.trust_btn = QPushButton()
-        self.trust_btn.clicked.connect(lambda: self.toggle_trust(self.current_device()))
+        self.trust_btn.clicked.connect(self.on_trust_button)
+        self.meta_btn = QPushButton(tr("Étiquettes, notes et groupe…"))
+        self.meta_btn.clicked.connect(self.on_meta_button)
         body = QWidget(); bl = QVBoxLayout(body); bl.setContentsMargins(0, 0, 4, 0); bl.setSpacing(14)
         bl.addLayout(head); bl.addWidget(sep); bl.addLayout(self.form); bl.addStretch(1)
         scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff); scroll.setWidget(body)
-        sl.addWidget(scroll, 1); sl.addWidget(self.edit_btn); sl.addWidget(self.trust_btn)
+        sl.addWidget(scroll, 1); sl.addWidget(self.edit_btn); sl.addWidget(self.meta_btn); sl.addWidget(self.trust_btn)
 
         split = QSplitter(); split.addWidget(tabs); split.addWidget(self.side)
         split.setStretchFactor(0, 1); split.setSizes([980, 340]); split.setChildrenCollapsible(False)
         self.setCentralWidget(split)
 
-        self.status = QLabel("Prêt")
+        self.status = QLabel(tr("Prêt"))
         self.count = QLabel("")
         self.progress = QProgressBar(); self.progress.setFixedWidth(160); self.progress.setTextVisible(False); self.progress.hide()
         self.statusBar().addWidget(self.status, 1)
@@ -1190,10 +1820,15 @@ class Main(QMainWindow):
         self.statusBar().setSizeGripEnabled(False)
 
         self.timer = QTimer(self); self.timer.timeout.connect(self.poll)
+        self.report_timer = QTimer(self); self.report_timer.timeout.connect(self.report_tick); self.report_timer.start(60000)
+        try:
+            QGuiApplication.styleHints().colorSchemeChanged.connect(self.on_system_theme)  # thème « automatique » : suit le système en direct
+        except AttributeError:
+            pass
         self.update_netlabel()
         w_rules = rules.current().warnings
         if w_rules:
-            self.status.setText(f"Règles de détection : {plural(len(w_rules), 'avertissement', 'avertissements')} (menu Détection)")
+            self.status.setText(tr("Règles de détection : {count} (menu Détection)", count=plural(len(w_rules), 'avertissement', 'avertissements')))
         try:
             minutes = int(self.settings.value("auto_minutes", 0))
         except (TypeError, ValueError):
@@ -1206,86 +1841,115 @@ class Main(QMainWindow):
     # ---------- construction ----------
     def _build_menu(self):
         mb = self.menuBar()
-        m = mb.addMenu("Fichier")
-        for text, fn in (("Exporter le rapport en PDF…", self.export_pdf), ("Exporter en JSON…", lambda: self.export("json")),
-                         ("Exporter en CSV…", lambda: self.export("csv"))):
+        m = mb.addMenu(tr("Fichier"))
+        for text, fn in ((tr("Exporter le rapport en PDF…"), self.export_pdf), (tr("Exporter la carte (PNG, SVG)…"), self.export_map),
+                         (tr("Exporter en JSON…"), lambda: self.export("json")), (tr("Exporter en CSV…"), lambda: self.export("csv"))):
             m.addAction(QAction(text, self, triggered=fn))
         m.addSeparator()
-        m.addAction(QAction("Comparer deux scans…", self, triggered=self.compare_scans))
-        m.addAction(QAction("Historique et données…", self, triggered=self.open_data))
+        m.addAction(QAction(tr("Comparer deux scans…"), self, triggered=self.compare_scans))
+        m.addAction(QAction(tr("Rapports planifiés…"), self, triggered=self.open_report_schedule))
+        m.addAction(QAction(tr("Historique et données…"), self, triggered=self.open_data))
         m.addSeparator()
-        quit_ = QAction("Quitter", self, triggered=self.close); quit_.setShortcut("Ctrl+Q"); m.addAction(quit_)
-        m = mb.addMenu("Scan")
-        self.act_scan = QAction("Lancer le scan", self, triggered=self.on_scan_button); self.act_scan.setShortcut("Ctrl+R")
-        self.act_stop = QAction("Arrêter le scan", self, triggered=self.stop_scan); self.act_stop.setShortcut("Ctrl+.")
+        quit_ = QAction(tr("Quitter"), self, triggered=self.close); quit_.setShortcut("Ctrl+Q"); m.addAction(quit_)
+        m = mb.addMenu(tr("Scan"))
+        self.act_scan = QAction(tr("Lancer le scan"), self, triggered=self.on_scan_button); self.act_scan.setShortcut("Ctrl+R")
+        self.act_stop = QAction(tr("Arrêter le scan"), self, triggered=self.stop_scan); self.act_stop.setShortcut("Ctrl+.")
         self.act_stop.setEnabled(False)
         m.addAction(self.act_scan); m.addAction(self.act_stop); m.addSeparator()
-        m.addAction(QAction("Faire confiance à tous les appareils en ligne…", self, triggered=self.trust_all))
-        m.addAction(QAction("Fusionner des doublons…", self, triggered=self.show_duplicates))
+        m.addAction(QAction(tr("Faire confiance à tous les appareils en ligne…"), self, triggered=self.trust_all))
+        m.addAction(QAction(tr("Fusionner des doublons…"), self, triggered=self.show_duplicates))
+        m.addAction(QAction(tr("Alertes (webhook, e-mail)…"), self, triggered=lambda: AlertsDialog(self).exec()))
         m.addSeparator()
-        auto = m.addMenu("Scan automatique"); group = QActionGroup(self); self.auto_actions = {}
-        for minutes, label in ((0, "Désactivé"), (5, "Toutes les 5 minutes"), (15, "Toutes les 15 minutes"),
-                               (30, "Toutes les 30 minutes"), (60, "Toutes les heures")):
+        auto = m.addMenu(tr("Scan automatique")); group = QActionGroup(self); self.auto_actions = {}
+        for minutes, label in ((0, tr("Désactivé")), (5, tr("Toutes les 5 minutes")), (15, tr("Toutes les 15 minutes")),
+                               (30, tr("Toutes les 30 minutes")), (60, tr("Toutes les heures"))):
             a = QAction(label, self, checkable=True); group.addAction(a); auto.addAction(a)
             a.triggered.connect(lambda _checked, mm=minutes: self.set_auto(mm)); self.auto_actions[minutes] = a
-        m = mb.addMenu("Affichage")
-        fit = QAction("Recentrer la carte", self, triggered=self.fit); fit.setShortcut("Ctrl+0"); m.addAction(fit)
-        lay = m.addMenu("Disposition"); lgroup = QActionGroup(self); self.layout_actions = {}
-        for mode, label in (("etoile", "Étoile (autour de cette machine)"), ("hierarchique", "Hiérarchique (Internet → box → switch → appareils)")):
+        m = mb.addMenu(tr("Affichage"))
+        fit = QAction(tr("Recentrer la carte"), self, triggered=self.fit); fit.setShortcut("Ctrl+0"); m.addAction(fit)
+        center = QAction(tr("Centrer sur la sélection"), self, triggered=self.center_on_selection); center.setShortcut("Ctrl+Shift+0"); m.addAction(center)
+        select_all = QAction(tr("Sélectionner tous les appareils"), self, triggered=self.select_all_nodes); select_all.setShortcut("Ctrl+Shift+A")
+        m.addAction(select_all)
+        mini = QAction(tr("Mini-carte"), self, checkable=True, checked=True, triggered=lambda on: (setattr(self.view, "show_minimap", on), self.view.viewport().update()))
+        m.addAction(mini)
+        lay = m.addMenu(tr("Disposition")); lgroup = QActionGroup(self); self.layout_actions = {}
+        for mode, label in (("etoile", tr("Étoile (autour de cette machine)")), ("hierarchique", tr("Hiérarchique (Internet → box → switch → appareils)")),
+                            ("types", tr("Regroupée par type d'appareil"))):
             a = QAction(label, self, checkable=True); lgroup.addAction(a); lay.addAction(a)
             a.triggered.connect(lambda _c, mm=mode: self.set_layout(mm)); self.layout_actions[mode] = a
         self.layout_actions[self.layout_mode].setChecked(True)
         lay.addSeparator()
-        lay.addAction(QAction("Réinitialiser les positions de cette disposition", self, triggered=self.reset_positions))
-        leg = QAction("Légende de la carte", self, checkable=True, checked=True, triggered=lambda on: (setattr(self.view, "show_legend", on), self.view.viewport().update()))
+        lay.addAction(QAction(tr("Réinitialiser les positions de cette disposition"), self, triggered=self.reset_positions))
+        leg = QAction(tr("Légende de la carte"), self, checkable=True, checked=True, triggered=lambda on: (setattr(self.view, "show_legend", on), self.view.viewport().update()))
         m.addAction(leg)
-        off = QAction("Afficher les appareils hors ligne", self, checkable=True, checked=self.show_offline, triggered=self.toggle_offline)
+        off = QAction(tr("Afficher les appareils hors ligne"), self, checkable=True, checked=self.show_offline, triggered=self.toggle_offline)
         m.addAction(off)
-        self.act_theme = QAction("Thème clair", self, checkable=True, triggered=self.toggle_theme); m.addAction(self.act_theme)
-        m = mb.addMenu("Sécurité")
-        self.act_security = QAction("Analyse de sécurité (lecture seule)", self, checkable=True, checked=self.security_on)
+        theme_menu = m.addMenu(tr("Thème")); tgroup = QActionGroup(self); self.theme_actions = {}
+        for mode, label in (("auto", tr("Automatique (suit le système)")), ("dark", tr("Sombre")), ("light", tr("Clair")),
+                            ("contrast", tr("Contraste élevé"))):
+            a = QAction(label, self, checkable=True); tgroup.addAction(a); theme_menu.addAction(a)
+            a.triggered.connect(lambda _c, mm=mode: self.set_theme_mode(mm)); self.theme_actions[mode] = a
+        self.theme_actions[self.theme_mode].setChecked(True)
+        size_menu = m.addMenu(tr("Taille du texte")); sgroup = QActionGroup(self); self.size_actions = {}
+        for key, label, scale in TEXT_SIZES:
+            a = QAction(tr(label), self, checkable=True); sgroup.addAction(a); size_menu.addAction(a)
+            a.triggered.connect(lambda _c, kk=key: self.set_text_size(kk)); self.size_actions[key] = a
+        self.size_actions[self.text_size].setChecked(True)
+        lang_menu = m.addMenu(tr("Langue"))
+        lang_group = QActionGroup(self)
+        for code, label in i18n.LANGUAGES.items():
+            act = QAction(label, self, checkable=True, checked=(code == i18n.language()))
+            act.triggered.connect(lambda _on, c=code: self.choose_language(c))
+            lang_group.addAction(act); lang_menu.addAction(act)
+        m = mb.addMenu(tr("Sécurité"))
+        self.act_passive = QAction(tr("Écoute seule (aucune sonde active)"), self, checkable=True, checked=self.passive_on)
+        self.act_passive.triggered.connect(self.toggle_passive)
+        m.addAction(self.act_passive)
+        m.addSeparator()
+        self.act_security = QAction(tr("Analyse de sécurité (lecture seule)"), self, checkable=True, checked=self.security_on)
         self.act_security.triggered.connect(self.toggle_security)
         m.addAction(self.act_security)
-        m.addAction(QAction("Voir le rapport de sécurité", self, triggered=lambda: self.tabs.setCurrentIndex(3)))
-        m.addAction(QAction("Exporter le rapport (Markdown)…", self, triggered=self.export_security))
+        m.addAction(QAction(tr("Voir le rapport de sécurité"), self, triggered=lambda: self.tabs.setCurrentIndex(3)))
+        m.addAction(QAction(tr("Exporter le rapport (Markdown)…"), self, triggered=self.export_security))
         m.addSeparator()
-        m.addAction(QAction("Ce que fait l'analyse…", self, triggered=lambda: QMessageBox.information(self, "Analyse de sécurité", SECURITY_INFO)))
-        m = mb.addMenu("Détection")
-        m.addAction(QAction("Règles personnalisées…", self, triggered=self.open_rules))
-        m.addAction(QAction("Créer une règle pour l'appareil sélectionné…", self, triggered=lambda: self.create_rule(self.current_device())))
-        m = mb.addMenu("Aide")
-        m.addAction(QAction("Ouvrir le journal d'erreurs", self, triggered=self.open_log))
-        m.addAction(QAction("À propos de Panther", self, triggered=lambda: QMessageBox.about(
-            self, "Panther", "Panther – scanner et cartographie de réseau local.\n\n"
-            "Moteur de scan maison (TCP, ARP, NetBIOS, mDNS), sans dépendance externe.\n"
-            "À n'utiliser que sur des réseaux dont vous avez l'autorisation.")))
+        m.addAction(QAction(tr("Ce que fait l'analyse…"), self, triggered=lambda: QMessageBox.information(self, tr("Analyse de sécurité"), SECURITY_INFO)))
+        m = mb.addMenu(tr("Détection"))
+        m.addAction(QAction(tr("Règles personnalisées…"), self, triggered=self.open_rules))
+        m.addAction(QAction(tr("Créer une règle pour l'appareil sélectionné…"), self, triggered=lambda: self.create_rule(self.current_device())))
+        m = mb.addMenu(tr("Aide"))
+        m.addAction(QAction(tr("Assistant de premier lancement…"), self, triggered=self.open_welcome))
+        m.addAction(QAction(tr("Mettre à jour la base des fabricants…"), self, triggered=self.update_oui))
+        m.addAction(QAction(tr("Ouvrir le journal d'erreurs"), self, triggered=self.open_log))
+        m.addAction(QAction(tr("À propos de Panther"), self, triggered=lambda: QMessageBox.about(
+            self, tr("Panther"), tr("Panther – scanner et cartographie de réseau local.\n\nMoteur de scan maison (TCP, ARP, NetBIOS, "
+                                "mDNS), sans dépendance externe.\nÀ n'utiliser que sur des réseaux dont vous avez l'autorisation."))))
 
     def _build_toolbar(self):
         tb = QToolBar(); tb.setMovable(False); tb.setFloatable(False); self.addToolBar(tb)
-        self.btn = QPushButton("Lancer le scan"); self.btn.setObjectName("primary"); self.btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn = QPushButton(tr("Lancer le scan")); self.btn.setObjectName("primary"); self.btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn.clicked.connect(self.on_scan_button); tb.addWidget(self.btn)
         self.net_btn = QPushButton(); self.net_btn.clicked.connect(self.open_networks); tb.addWidget(self.net_btn)
-        lab = QLabel("  Profondeur"); lab.setObjectName("muted"); tb.addWidget(lab)
+        lab = QLabel(tr("  Profondeur")); lab.setObjectName("muted"); tb.addWidget(lab)
         self.depth = QComboBox()
-        for key, label in (("presence", "Présence"), ("rapide", "Rapide"), ("normal", "Normal"), ("approfondi", "Approfondi")):
+        for key, label in (("presence", tr("Présence")), ("rapide", tr("Rapide")), ("normal", tr("Normal")), ("approfondi", tr("Approfondi"))):
             self.depth.addItem(label, key)
-        self.depth.setToolTip("Présence : qui est là ? (réutilise les détails du dernier scan complet, très discret).\n"
-                              "Rapide : ports courants.\nNormal : bon équilibre.\n"
-                              "Approfondi : plus de ports et des délais plus longs.\n"
-                              "Les scans automatiques utilisent la présence, avec un scan complet au plus toutes les heures.")
+        self.depth.setToolTip(tr("Présence : qui est là ? (réutilise les détails du dernier scan complet, très discret).\nRapide : "
+                                 "ports courants.\nNormal : bon équilibre.\nApprofondi : plus de ports et des délais plus longs.\nLes "
+                                 "scans automatiques utilisent la présence, avec un scan complet au plus toutes les heures."))
         self.depth.setCurrentIndex(max(self.depth.findData(self.settings.value("depth", "normal")), 0))
         self.depth.currentIndexChanged.connect(lambda _i: self.settings.setValue("depth", self.depth.currentData()))
+        self.depth.setEnabled(not self.passive_on)
         tb.addWidget(self.depth)
-        lab2 = QLabel("  Interface"); lab2.setObjectName("muted"); tb.addWidget(lab2)
+        lab2 = QLabel(tr("  Interface")); lab2.setObjectName("muted"); tb.addWidget(lab2)
         self.iface_combo = RefreshCombo()
-        self.iface_combo.setToolTip("Réseau à scanner. « Automatique » suit la route par défaut ; "
-                                    "choisissez une interface pour scanner un autre réseau (Ethernet, VPN…).")
+        self.iface_combo.setToolTip(tr("Réseau à scanner. « Automatique » suit la route par défaut ; choisissez une interface pour scanner "
+                                       "un autre réseau (Ethernet, VPN…)."))
         self.iface_combo.about_to_show.connect(self.populate_ifaces)
         self.populate_ifaces()
         self.iface_combo.currentIndexChanged.connect(lambda _i: self.settings.setValue("iface", self.iface_combo.currentData() or ""))
         tb.addWidget(self.iface_combo)
-        self.netlabel = ElidedLabel("  Aucun scan effectué"); self.netlabel.setObjectName("muted"); tb.addWidget(self.netlabel)
-        self.search = QLineEdit(); self.search.setPlaceholderText("Filtrer (nom, IP, MAC, type…)")
+        self.netlabel = ElidedLabel(tr("  Aucun scan effectué")); self.netlabel.setObjectName("muted"); tb.addWidget(self.netlabel)
+        self.search = QLineEdit(); self.search.setPlaceholderText(tr("Filtrer : nom, IP, type…  tag:xxx  groupe:xxx"))
         self.search.setClearButtonEnabled(True); self.search.setFixedWidth(220)
         self.search.textChanged.connect(self.apply_filter); tb.addWidget(self.search)
 
@@ -1298,13 +1962,19 @@ class Main(QMainWindow):
 
     def stop_scan(self):
         if self.scanner.stop():
-            self.status.setText("Arrêt en cours…"); self.btn.setEnabled(False); self.act_stop.setEnabled(False)
+            self.status.setText(tr("Arrêt en cours…")); self.btn.setEnabled(False); self.act_stop.setEnabled(False)
 
     FULL_SCAN_EVERY = 3600  # secondes : au plus un scan complet par heure pendant les scans automatiques
 
     def choose_depth(self, auto=False, now=None):
         """Profondeur réellement utilisée et appareils connus. Le scan de présence réutilise les détails du dernier
-        scan complet : il n'a de sens que s'il y en a un, et les scans automatiques refont un scan complet toutes les heures."""
+        scan complet : il n'a de sens que s'il y en a un, et les scans automatiques refont un scan complet toutes les heures.
+        En écoute seule, on ne sonde rien : on lit la table du noyau et on reprend les détails du dernier scan complet."""
+        if self.passive_on:
+            try:
+                return "ecoute", history.last_snapshot_map()
+            except (sqlite3.Error, OSError):
+                return "ecoute", {}
         chosen = self.depth.currentData()
         now = time.time() if now is None else now
         want_presence = chosen == "presence" or (auto and now - self.last_full_scan < self.FULL_SCAN_EVERY)
@@ -1323,7 +1993,7 @@ class Main(QMainWindow):
             aliases = history.alias_map()
         except (sqlite3.Error, OSError):
             aliases = {}
-        if self.scanner.start(self.targets, self.snmp, depth, self.security_on, self.iface_combo.currentData() or None, known, aliases):
+        if self.scanner.start(self.targets, self.snmp, depth, self.security_on and not self.passive_on, self.iface_combo.currentData() or None, known, aliases):
             self.t0, self.last_scan_auto, self.last_new = time.time(), auto, []
             self.act_scan.setEnabled(False); self.act_stop.setEnabled(True)
             self.progress.setValue(0); self.progress.show(); self.timer.start(700)
@@ -1341,20 +2011,20 @@ class Main(QMainWindow):
         elapsed = int(time.time() - self.t0)
         self.update_count()
         if busy:
-            phase = "Découverte des hôtes" if s["progress"] < 60 else "Analyse des appareils"
+            phase = tr("Découverte des hôtes") if s["progress"] < 60 else tr("Analyse des appareils")
             if self.btn.isEnabled():
-                self.btn.setText(f"Arrêter le scan ({s['progress']} %)")
-            self.status.setText(f"{phase}  ·  {elapsed} s  ·  profondeur {s['depth']}")
+                self.btn.setText(tr("Arrêter le scan ({progress} %)", progress=s['progress']))
+            self.status.setText(tr("{phase}  ·  {elapsed} s  ·  profondeur {depth}", phase=phase, elapsed=elapsed, depth=s['depth']))
             return
         self.timer.stop(); self.progress.hide()
         self.btn.setEnabled(True); self.act_scan.setEnabled(True); self.act_stop.setEnabled(False)
-        self.btn.setText("Relancer le scan")
+        self.btn.setText(tr("Relancer le scan"))
         if s["status"] == "error":
-            self.status.setText(f"Erreur : {s['error']}")
+            self.status.setText(tr("Erreur : {error}", error=s['error']))
         elif s["status"] == "stopped":
             self.devices = s["devices"]; self.rebuild(); self.update_count()
-            self.status.setText(f"Scan interrompu : {len(self.devices)} appareil(s) analysé(s) avant l'arrêt" if self.devices
-                                else "Scan interrompu pendant la découverte : aucun appareil n'avait encore été analysé")
+            self.status.setText(tr("Scan interrompu : {devices_count} appareil(s) analysé(s) avant l'arrêt", devices_count=len(self.devices)) if self.devices
+                                else tr("Scan interrompu pendant la découverte : aucun appareil n'avait encore été analysé"))
             self.fit()
         else:
             self.finish_scan(s, elapsed)
@@ -1373,38 +2043,40 @@ class Main(QMainWindow):
                 d["new"] = dkey(d) in new
             offline = self.load_offline(online, s["networks"])
         except (sqlite3.Error, OSError) as e:
-            log.warning("Historique indisponible", exc_info=True)
-            note = f"  ·  historique indisponible ({e})"
+            log.warning(tr("Historique indisponible"), exc_info=True)
+            note = tr("  ·  historique indisponible ({e})", e=e)
         self.devices = online + offline
         self.rebuild(); self.update_count(); self.refresh_journal(); self.refresh_security()
         self.last_new = [f"{d['hostname'] or d['ip']}  ·  {d['ip']}" for d in online if d.get("new")]
-        light = s.get("depth") == "presence"
+        light = s.get("depth") in ("presence", "ecoute")
         if not light:
             self.last_full_scan = time.time()
             self.settings.setValue("last_full_scan", self.last_full_scan)
-        msg = f"Scan de présence terminé en {elapsed} s" if light else f"Scan terminé en {elapsed} s"
+        msg = (tr("Écoute terminée en {elapsed} s", elapsed=elapsed) if s.get("depth") == "ecoute" else tr("Scan de présence terminé en {elapsed} s", elapsed=elapsed)
+               if light else tr("Scan terminé en {elapsed} s", elapsed=elapsed))
         if res["baseline"]:
-            msg += f"  ·  première analyse : {len(online)} appareil(s) enregistrés comme connus"
+            msg += tr("  ·  première analyse : {online_count} appareil(s) enregistrés comme connus", online_count=len(online))
         elif self.last_new:
-            msg += f"  ·  {len(self.last_new)} nouvel appareil" + ("s" if len(self.last_new) > 1 else "")
+            msg += tr("  ·  {last_new_count} nouvel appareil", last_new_count=len(self.last_new)) + ("s" if len(self.last_new) > 1 else "")
             if self.last_scan_auto:
                 first = [d["hostname"] or d["ip"] for d in online if d.get("new")][:3]
-                self.notify("Panther : nouvel appareil sur le réseau", ", ".join(first) + ("…" if len(self.last_new) > 3 else ""))
+                self.notify(tr("Panther : nouvel appareil sur le réseau"), ", ".join(first) + ("…" if len(self.last_new) > 3 else ""))
         if self.security_on and fr["baseline"]:
-            msg += "  ·  analyse de sécurité : référence enregistrée"
+            msg += tr("  ·  analyse de sécurité : référence enregistrée")
         if fr["new"]:
             msg += "  ·  " + plural(len(fr["new"]), "nouvelle exposition", "nouvelles expositions")
             bad = [(d, f) for d, f in fr["new"] if security.RANK[f["severity"]] >= security.RANK["élevé"]]
             if bad and self.last_scan_auto:
                 d, f = bad[0]
-                self.notify("Panther : nouvelle exposition", f"{d['hostname'] or d['ip']} : {f['title']}" + ("…" if len(bad) > 1 else ""))
+                self.notify(tr("Panther : nouvelle exposition"), tr("{hostname} : {title}", hostname=d['hostname'] or d['ip'], title=f['title']) + ("…" if len(bad) > 1 else ""))
         if fr["fixed"]:
             msg += "  ·  " + plural(len(fr["fixed"]), "exposition corrigée", "expositions corrigées")
+        self.send_alerts(online, res, fr, auto=self.last_scan_auto)
         self.dup_suggestions = identity.suggest_duplicates(self.devices)
         if self.dup_suggestions:
-            msg += "  ·  " + plural(len(self.dup_suggestions), "doublon possible", "doublons possibles") + " (menu Scan)"
+            msg += "  ·  " + plural(len(self.dup_suggestions), "doublon possible", "doublons possibles") + tr(" (menu Scan)")
         w = len(self.scan_extra.get("warnings") or [])
-        self.status.setText(msg + (f"  ·  {w} avertissement(s)" if w else "") + note)
+        self.status.setText(msg + (tr("  ·  {w} avertissement(s)", w=w) if w else "") + note)
         self.fit()
 
     def load_offline(self, online, nets):
@@ -1432,12 +2104,29 @@ class Main(QMainWindow):
         cur = self.iface_combo.currentData() if self.iface_combo.count() else self.settings.value("iface", "")
         cb = self.iface_combo
         cb.blockSignals(True); cb.clear()
-        cb.addItem("Automatique", "")
+        cb.addItem(tr("Automatique"), "")
         for it in networks.interfaces():
-            cb.addItem(f"{it['iface']}  ·  {networks.LINK_LABELS.get(it['kind'], '')}", it["iface"])
+            cb.addItem(tr("{iface}  ·  {link_labels_label}", iface=it['iface'], link_labels_label=networks.LINK_LABELS.get(it['kind'], '')), it["iface"])
             cb.setItemData(cb.count() - 1, f"{it['ip']}  ({it['cidr']})", Qt.ItemDataRole.ToolTipRole)
         cb.setCurrentIndex(max(cb.findData(cur), 0))
         cb.blockSignals(False)
+
+    def edit_meta(self, dev):
+        if not dev or dev.get("virtual"):
+            return
+        try:
+            groups = history.meta_groups()
+        except (sqlite3.Error, OSError):
+            groups = []
+        dlg = MetaDialog(dev, groups, self)
+        if dlg.exec():
+            group, tags, note = dlg.values()
+            try:
+                history.set_meta(dev, note=note, tags=tags, group=group)
+            except (sqlite3.Error, OSError) as e:
+                QMessageBox.warning(self, tr("Panther"), tr("Impossible d'enregistrer :\n{e}", e=e)); return
+            self.refresh_views()
+            self.status.setText(tr("Étiquettes et notes enregistrées"))
 
     def reclassify_all(self):
         """Après un changement de règles : recalcule le type des appareils analysés (les appareils de présence gardent le leur)."""
@@ -1458,16 +2147,38 @@ class Main(QMainWindow):
 
     def create_rule(self, dev):
         if not dev or dev.get("virtual"):
-            QMessageBox.information(self, "Règle de détection", "Sélectionnez d'abord un appareil.")
+            QMessageBox.information(self, tr("Règle de détection"), tr("Sélectionnez d'abord un appareil."))
             return
         dlg = RuleFromDeviceDialog(dev, self)
         if dlg.exec():
             try:
                 rules.add_rule(dlg.build())
             except (OSError, rules.RuleError) as e:
-                QMessageBox.warning(self, "Panther", f"Impossible d'enregistrer la règle :\n{e}"); return
+                QMessageBox.warning(self, tr("Panther"), tr("Impossible d'enregistrer la règle :\n{e}", e=e)); return
             self.reclassify_all()
-            self.status.setText("Règle enregistrée et appliquée aux appareils affichés")
+            self.status.setText(tr("Règle enregistrée et appliquée aux appareils affichés"))
+
+    def send_alerts(self, online, res, fr, auto):
+        """Après un scan : alerte (webhook / e-mail) sur les événements choisis, en arrière-plan. Jamais pour la première analyse."""
+        try:
+            cfg = alerts.load()
+            if not cfg["enabled"] or (cfg["events"]["auto_only"] and not auto) or not (cfg["webhook"]["enabled"] or cfg["email"]["enabled"]):
+                return
+            events = alerts.build_events(online, res, fr, cfg, res.get("event_list", []))
+        except Exception:  # noqa: BLE001 - les alertes ne doivent jamais gêner l'affichage du scan
+            log.exception("Préparation des alertes")
+            return
+        if not events:
+            return
+        worker = AlertWorker(cfg, events, self)
+        worker.finished_with.connect(self.on_alerts_sent)
+        self._alert_workers = [w for w in getattr(self, "_alert_workers", []) if w.isRunning()] + [worker]
+        worker.start()
+
+    def on_alerts_sent(self, results):
+        bad = [f"{c} : {err}" for c, ok, err in results if not ok]
+        self.status.setText((tr("Alerte envoyée (") + ", ".join(c for c, ok, _ in results if ok) + ")") if not bad
+                            else tr("Alerte non envoyée : ") + " ; ".join(bad))
 
     def apply_retention(self, scans_days, events_days):
         history.KEEP_SCANS_DAYS, history.KEEP_EVENTS_DAYS = int(scans_days), int(events_days)
@@ -1475,114 +2186,278 @@ class Main(QMainWindow):
 
     def open_data(self):
         dlg = DataDialog(history.KEEP_SCANS_DAYS, history.KEEP_EVENTS_DAYS, self)
-        if dlg.exec():
+        accepted = dlg.exec()
+        if dlg.erased:
+            self.after_erase()
+        if accepted:
             self.apply_retention(*dlg.values())
-            self.status.setText("Durée de conservation enregistrée")
+            if not dlg.erased:
+                self.status.setText(tr("Durée de conservation enregistrée"))
+
+    def after_erase(self):
+        """L'historique vient d'être effacé : la fenêtre repart de zéro (la prochaine analyse sera une nouvelle référence)."""
+        self.devices, self.selected, self.dup_suggestions, self.last_new = [], None, [], []
+        self.last_full_scan = 0.0
+        self.settings.setValue("last_full_scan", 0.0)
+        self.rebuild(); self.update_count(); self.refresh_journal(); self.refresh_security(); self.refresh_panel()
+        self.status.setText(tr("Historique effacé"))
 
     def compare_scans(self):
         try:
             scans = history.list_scans()
         except (sqlite3.Error, OSError) as e:
-            QMessageBox.warning(self, "Panther", f"Historique indisponible :\n{e}"); return
+            QMessageBox.warning(self, tr("Panther"), tr("Historique indisponible :\n{e}", e=e)); return
         if len(scans) < 2:
-            QMessageBox.information(self, "Comparer deux scans", "Il faut au moins deux scans enregistrés. Lancez un scan "
-                                    "(ou deux) : chaque scan terminé est conservé pour la comparaison.")
+            QMessageBox.information(self, tr("Comparer deux scans"), tr("Il faut au moins deux scans enregistrés. Lancez un scan (ou deux) : chaque scan terminé est "
+                                                                    "conservé pour la comparaison."))
             return
         CompareDialog(scans, self).exec()
 
-    def render_map_image(self, width=1600):
-        """Image de la carte, en thème clair (adapté au papier), sans modifier l'affichage."""
-        r = self.scene.itemsBoundingRect().adjusted(-40, -40, 40, 40)
-        if r.isEmpty():
-            return None
-        h = max(1, int(width * r.height() / r.width()))
-        img = QImage(width, h, QImage.Format.Format_ARGB32)
-        saved, sel = dict(T), [i for i in self.scene.selectedItems()]
+    def paint_map(self, painter, target, source, theme="light"):
+        """Dessine la carte dans `painter` (image, SVG…) avec le thème demandé, sans modifier l'affichage ni la sélection."""
+        saved, sel = dict(T), list(self.scene.selectedItems())
         self._building = True
         self.scene.clearSelection()
-        T.update(THEMES["light"])
+        T.update(THEMES[theme])
         try:
-            img.fill(QColor(T["surface"]))
-            p = QPainter(img); p.setRenderHint(QPainter.RenderHint.Antialiasing)
-            self.scene.render(p, QRectF(0, 0, width, h), r)
-            p.end()
+            painter.fillRect(target, QColor(T["surface"] if theme == "light" else T["bg"]))
+            self.scene.render(painter, target, source)
         finally:
             T.clear(); T.update(saved)
             for i in sel:
                 i.setSelected(True)
             self._building = False
+
+    def render_map_image(self, width=1600, theme="light"):
+        """Image de la carte (thème clair par défaut : adapté au papier)."""
+        r = self.scene.itemsBoundingRect()
+        if r.isEmpty():
+            return None
+        r = r.adjusted(-40, -40, 40, 40)
+        h = max(1, int(width * r.height() / r.width()))
+        img = QImage(width, h, QImage.Format.Format_ARGB32)
+        p = QPainter(img); p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        try:
+            self.paint_map(p, QRectF(0, 0, width, h), r, theme)
+        finally:
+            p.end()
         return img
 
-    def export_pdf(self):
-        if not self.devices:
-            QMessageBox.information(self, "Rapport PDF", "Aucun résultat à exporter : lancez d'abord un scan."); return
-        path, _ = QFileDialog.getSaveFileName(self, "Exporter le rapport", "rapport-panther.pdf", "PDF (*.pdf)")
+    def write_map(self, path, theme="light", width=2000):
+        """Exporte la carte en PNG ou en SVG (selon l'extension). SVG : vectoriel, à retoucher dans Inkscape ou à insérer dans un document."""
+        r = self.scene.itemsBoundingRect()
+        if r.isEmpty():
+            raise OSError(tr("la carte est vide : lancez d'abord un scan"))
+        r = r.adjusted(-40, -40, 40, 40)
+        if path.lower().endswith(".svg"):
+            from PyQt6.QtSvg import QSvgGenerator
+            h = max(1, int(width * r.height() / r.width()))
+            gen = QSvgGenerator()
+            gen.setFileName(path); gen.setSize(QSize(width, h)); gen.setViewBox(QRectF(0, 0, width, h)); gen.setTitle(tr("Panther – carte du réseau"))
+            p = QPainter(gen)
+            try:
+                self.paint_map(p, QRectF(0, 0, width, h), r, theme)
+            finally:
+                p.end()
+            return
+        img = self.render_map_image(width, theme)
+        if img is None or not img.save(path, "PNG"):
+            raise OSError(tr("impossible d'écrire {path}", path=path))
+
+    def export_map(self):
+        if not self.nodes:
+            QMessageBox.information(self, tr("Exporter la carte"), tr("La carte est vide : lancez d'abord un scan.")); return
+        path, flt = QFileDialog.getSaveFileName(self, tr("Exporter la carte"), "carte-panther.png",
+                                               tr("Image PNG (*.png);;Image vectorielle SVG (*.svg)"))
         if not path:
             return
+        if not path.lower().endswith((".png", ".svg")):
+            path += ".svg" if "SVG" in flt else ".png"
+        try:
+            self.write_map(path, theme="dark" if T["bg"] == THEMES["dark"]["bg"] else "light")
+        except OSError as e:
+            QMessageBox.warning(self, tr("Panther"), tr("Export impossible :\n{e}", e=e)); return
+        self.status.setText(tr("Carte exportée : {basename}", basename=os.path.basename(path)))
+
+    def write_pdf_report(self, path):
+        """Rapport PDF complet (résumé, carte, changements depuis le scan précédent, appareils, exposition, avertissements)."""
         changes = None
         try:  # évolution depuis le scan précédent, si on en a un
             scans = history.list_scans(2)
             if len(scans) == 2:
                 changes = compare.compare(history.load_snapshot(scans[1]["id"]), history.load_snapshot(scans[0]["id"]))
         except (sqlite3.Error, OSError):
-            pass
+            log.debug("Comparaison avec le scan précédent indisponible", exc_info=True)
         img = self.render_map_image()
         page = reportpdf.build_html(self.devices, [n["cidr"] for n in self.networks_info], time.time(), "map" if img else None,
-                                    self.security_on, self.scan_extra.get("warnings") or [], changes)
+                                    self.security_on, self.scan_extra.get("warnings") or [], changes,
+                                    image_width=reportpdf.map_width(img))
+        reportpdf.write_pdf(path, page, img)
+
+    def export_pdf(self):
+        if not self.devices:
+            QMessageBox.information(self, tr("Rapport PDF"), tr("Aucun résultat à exporter : lancez d'abord un scan.")); return
+        path, _ = QFileDialog.getSaveFileName(self, tr("Exporter le rapport"), "rapport-panther.pdf", "PDF (*.pdf)")
+        if not path:
+            return
         try:
-            reportpdf.write_pdf(path, page, img)
+            self.write_pdf_report(path)
         except OSError as e:
-            QMessageBox.warning(self, "Panther", f"Impossible d'écrire le PDF :\n{e}"); return
-        self.status.setText(f"Rapport PDF exporté : {os.path.basename(path)}")
+            QMessageBox.warning(self, tr("Panther"), tr("Impossible d'écrire le PDF :\n{e}", e=e)); return
+        self.status.setText(tr("Rapport PDF exporté : {basename}", basename=os.path.basename(path)))
+
+    # ---------- rapports planifiés
+    def report_settings(self):
+        s = self.settings
+        try:
+            keep = int(s.value("report_keep", 10))
+            last = float(s.value("report_last", 0))
+        except (TypeError, ValueError):
+            keep, last = 10, 0.0
+        return {"enabled": str(s.value("report_enabled", False)).lower() in ("true", "1"),
+                "freq": s.value("report_freq", "weekly") if s.value("report_freq", "weekly") in schedule.PERIODS else "weekly",
+                "folder": str(s.value("report_folder", os.path.join(os.path.dirname(history.PATH), "rapports") if self.demo
+                                      else os.path.join(os.path.expanduser("~"), "Panther-rapports"))), "keep": max(1, min(keep, schedule.MAX_KEEP)),
+                "last": last}
+
+    def save_report_settings(self, enabled, freq, folder, keep):
+        s = self.settings
+        s.setValue("report_enabled", bool(enabled)); s.setValue("report_freq", freq if freq in schedule.PERIODS else "weekly")
+        s.setValue("report_folder", folder); s.setValue("report_keep", int(keep))
+
+    def generate_scheduled_report(self, now=None):
+        """Écrit un rapport dans le dossier choisi et supprime les plus anciens. -> chemin du fichier. Lève OSError."""
+        cfg = self.report_settings()
+        folder = schedule.ensure_folder(cfg["folder"])
+        now = time.time() if now is None else now
+        path = os.path.join(folder, schedule.filename(now))
+        self.write_pdf_report(path)
+        removed = schedule.prune(folder, cfg["keep"])
+        self.settings.setValue("report_last", now)
+        if removed:
+            log.info("Rapports planifiés : %d ancien(s) supprimé(s) dans %s", len(removed), folder)
+        return path
+
+    def report_tick(self, now=None):
+        """Appelé chaque minute : produit le rapport planifié s'il est dû, qu'un scan a eu lieu et qu'aucun scan n'est en cours."""
+        cfg = self.report_settings()
+        now = time.time() if now is None else now
+        if not cfg["enabled"] or not self.devices or self.scanner.snapshot()["status"] == "scanning":
+            return None
+        if not schedule.is_due(cfg["last"], now, cfg["freq"]):
+            return None
+        try:
+            path = self.generate_scheduled_report(now)
+        except OSError as e:
+            log.warning(tr("Rapport planifié impossible : %s"), e)
+            self.status.setText(tr("Rapport planifié impossible : {e}", e=e))
+            self.settings.setValue("report_last", now)  # on réessaiera à la prochaine échéance, pas à chaque minute
+            return None
+        self.status.setText(tr("Rapport planifié enregistré : {basename}", basename=os.path.basename(path)))
+        return path
+
+    def open_report_schedule(self):
+        dlg = ReportScheduleDialog(self.report_settings(), self)
+        if dlg.exec():
+            self.save_report_settings(*dlg.values())
+            self.status.setText(tr("Rapports planifiés : réglages enregistrés"))
+        elif dlg.generated:
+            self.refresh_panel()
 
     def merge_into(self, keep, drop):
         """Regroupe l'historique de `drop` (hors ligne) dans `keep`. Retourne True si la fusion a eu lieu."""
         if not keep or not drop or drop.get("online", True) or keep is drop:
-            QMessageBox.information(self, "Fusion", "Seul un appareil hors ligne peut être fusionné dans un autre appareil.")
+            QMessageBox.information(self, tr("Fusion"), tr("Seul un appareil hors ligne peut être fusionné dans un autre appareil."))
             return False
         try:
             history.merge_devices(dkey(keep), dkey(drop))
             history.annotate([keep])
         except (ValueError, sqlite3.Error, OSError) as e:
-            QMessageBox.warning(self, "Panther", f"Fusion impossible :\n{e}")
+            QMessageBox.warning(self, tr("Panther"), tr("Fusion impossible :\n{e}", e=e))
             return False
         store.apply(keep, store.load(), history.alias_map())
         self.devices = [d for d in self.devices if d is not drop]
         self.dup_suggestions = [t for t in self.dup_suggestions if t[0] is not drop and t[1] is not drop]
         self.selected = dkey(keep)
         self.rebuild(); self.update_count(); self.refresh_panel(); self.refresh_journal()
-        self.status.setText(f"{drop['hostname'] or drop['ip']} fusionné dans {keep['hostname'] or keep['ip']}")
+        self.status.setText(tr("{name} fusionné dans {other}", name=drop['hostname'] or drop['ip'], other=keep['hostname'] or keep['ip']))
         return True
 
     def open_merge(self, dev):
         if dev.get("online", True):
             cands = [d for d in self.devices if not d.get("online", True) and not d.get("virtual")]
-            text = (f"Choisissez l'appareil hors ligne qui est en réalité « {dev['hostname'] or dev['ip']} » (par exemple avec une ancienne "
-                    "adresse MAC). Son historique, sa confiance et ses noms seront regroupés ici.")
+            text = tr("Choisissez l'appareil hors ligne qui est en réalité « {name} » (par exemple avec une ancienne adresse MAC). "
+                      "Son historique, sa confiance et ses noms seront regroupés ici.", name=dev['hostname'] or dev['ip'])
         else:
             cands = [d for d in self.devices if d.get("online", True) and not d.get("virtual") and not d.get("is_self")]
-            text = (f"« {dev['hostname'] or dev['ip']} » (hors ligne) est-il un appareil actuellement en ligne ? Choisissez-le : "
-                    "l'historique de l'appareil hors ligne sera regroupé avec le sien.")
+            text = tr("« {name} » (hors ligne) est-il un appareil actuellement en ligne ? Choisissez-le : "
+                      "l'historique de l'appareil hors ligne sera regroupé avec le sien.", name=dev['hostname'] or dev['ip'])
         if not cands:
-            QMessageBox.information(self, "Fusion", "Aucun appareil à fusionner."); return
-        dlg = MergeDialog("Fusionner des appareils", text, cands, self)
+            QMessageBox.information(self, tr("Fusion"), tr("Aucun appareil à fusionner.")); return
+        dlg = MergeDialog(tr("Fusionner des appareils"), text, cands, self)
         if dlg.exec():
             other = dlg.chosen()
             self.merge_into(dev, other) if dev.get("online", True) else self.merge_into(other, dev)
 
     def show_duplicates(self):
         if not self.dup_suggestions:
-            QMessageBox.information(self, "Doublons", "Aucun doublon probable : aucun appareil récent ne ressemble à un appareil hors ligne.")
+            QMessageBox.information(self, tr("Doublons"), tr("Aucun doublon probable : aucun appareil récent ne ressemble à un appareil hors ligne."))
             return
         DuplicatesDialog(self.dup_suggestions, self.merge_into, self).exec()
         self.refresh_panel()
+
+    def wake_device(self, dev):
+        """Envoie un paquet Wake-on-LAN à un appareil hors ligne (si son adresse MAC est la vraie, pas une adresse privée)."""
+        name = dev["hostname"] or dev["ip"]
+        if self.demo:
+            QMessageBox.information(self, tr("Démonstration"), tr("Mode démonstration : aucun paquet n'est envoyé sur le réseau.")); return
+        if fingerprint.is_random_mac(dev.get("mac", "")):
+            QMessageBox.information(self, tr("Wake-on-LAN"), tr("« {name} » utilise une adresse MAC aléatoire (adresse privée Wi-Fi) : elle ne peut pas servir à le "
+                                                            "réveiller. Seule l'adresse matérielle d'origine de la carte réseau le peut.", name=name))
+            return
+        targets = ["255.255.255.255"]
+        if dev.get("network"):
+            try:
+                targets.insert(0, wol.broadcast_for(dev["network"]))
+            except ValueError:
+                pass
+        try:
+            n = wol.send(dev["mac"], targets)
+        except ValueError as e:
+            QMessageBox.warning(self, tr("Wake-on-LAN"), str(e)); return
+        self.status.setText(tr("Paquet de réveil envoyé à {name} ({mac}) : {n} envoi(s). Il faut que Wake-on-LAN soit activé sur "
+                               "l'appareil (en général en Ethernet, rarement en Wi-Fi).", name=name, mac=dev['mac'], n=n))
+
+    def update_oui(self):
+        if getattr(self, "oui_worker", None) and self.oui_worker.isRunning():
+            return
+        if self.demo:
+            QMessageBox.information(self, tr("Démonstration"), tr("Mode démonstration : aucun téléchargement n'est effectué.")); return
+        ok = QMessageBox.question(self, tr("Mettre à jour la base des fabricants"),
+                                  tr("Panther va télécharger le registre officiel des fabricants (IEEE) depuis\n{url}\n(environ 6 Mo) et "
+                                     "l'enregistrer dans :\n{user_path}\n\nAucune donnée de votre réseau n'est envoyée. Continuer ?", url=ouiupdate.URL, user_path=ouiupdate.USER_PATH)) == QMessageBox.StandardButton.Yes
+        if not ok:
+            return
+        self.status.setText(tr("Téléchargement de la base des fabricants…"))
+        self.oui_worker = OuiWorker(self)
+        self.oui_worker.done.connect(self.on_oui_done)
+        self.oui_worker.failed.connect(self.on_oui_failed)
+        self.oui_worker.start()
+
+    def on_oui_done(self, n):
+        self.status.setText(tr("Base des fabricants mise à jour : {n} entrées", n=n))
+        QMessageBox.information(self, tr("Base des fabricants"), tr("{n} fabricants enregistrés. Les nouveaux noms apparaîtront au prochain scan.", n=n))
+
+    def on_oui_failed(self, message):
+        self.status.setText(tr("Mise à jour de la base des fabricants impossible"))
+        QMessageBox.warning(self, tr("Base des fabricants"), tr("La base n'a pas été modifiée.\n\n{message}", message=message))
 
     def open_log(self):
         from . import log as plog
         if os.path.exists(plog.PATH):
             QDesktopServices.openUrl(QUrl.fromLocalFile(plog.PATH))
         else:
-            QMessageBox.information(self, "Journal d'erreurs", f"Aucune erreur enregistrée pour le moment.\n\nEmplacement : {plog.PATH}")
+            QMessageBox.information(self, tr("Journal d'erreurs"), tr("Aucune erreur enregistrée pour le moment.\n\nEmplacement : {path}", path=plog.PATH))
 
     def toggle_trust(self, dev):
         if not dev:
@@ -1591,34 +2466,34 @@ class Main(QMainWindow):
         try:
             history.set_trusted([dev], flag)
         except (sqlite3.Error, OSError) as e:
-            QMessageBox.warning(self, "Panther", f"Impossible d'enregistrer la confiance :\n{e}"); return
+            QMessageBox.warning(self, tr("Panther"), tr("Impossible d'enregistrer la confiance :\n{e}", e=e)); return
         self.refresh_views(); self.refresh_journal()
-        self.status.setText(f"{dev['hostname'] or dev['ip']} : " + ("marqué de confiance" if flag else "confiance retirée"))
+        self.status.setText(tr("{hostname} : ", hostname=dev['hostname'] or dev['ip']) + (tr("marqué de confiance") if flag else tr("confiance retirée")))
 
     def trust_all(self):
         todo = [d for d in self.devices if d.get("online", True) and not d.get("trusted")]
         if not todo:
-            QMessageBox.information(self, "Panther", "Aucun appareil en ligne à valider."); return
+            QMessageBox.information(self, tr("Panther"), tr("Aucun appareil en ligne à valider.")); return
         names = "\n".join(f"• {d['hostname'] or d['ip']}  ({d['ip']})" for d in todo[:12]) + ("\n…" if len(todo) > 12 else "")
-        if QMessageBox.question(self, "Faire confiance", f"Marquer ces {len(todo)} appareil(s) comme de confiance ?\n\n{names}\n\n"
-                                "Vérifiez qu'ils sont tous reconnus : un intrus présent maintenant serait validé.") \
+        if QMessageBox.question(self, tr("Faire confiance"), tr("Marquer ces {todo_count} appareil(s) comme de confiance ?\n\n{names}\n\nVérifiez qu'ils sont tous "
+                                                            "reconnus : un intrus présent maintenant serait validé.", todo_count=len(todo), names=names)) \
                 != QMessageBox.StandardButton.Yes:
             return
         try:
             history.set_trusted(todo, True)
         except (sqlite3.Error, OSError) as e:
-            QMessageBox.warning(self, "Panther", f"Impossible d'enregistrer la confiance :\n{e}"); return
+            QMessageBox.warning(self, tr("Panther"), tr("Impossible d'enregistrer la confiance :\n{e}", e=e)); return
         self.refresh_views(); self.refresh_journal()
-        self.status.setText(f"{len(todo)} appareil(s) marqués de confiance")
+        self.status.setText(tr("{todo_count} appareil(s) marqués de confiance", todo_count=len(todo)))
 
     def forget_device(self, dev):
-        if not dev or QMessageBox.question(self, "Oublier", f"Oublier {dev['hostname'] or dev['ip']} et son historique ?") \
+        if not dev or QMessageBox.question(self, tr("Oublier"), tr("Oublier {hostname} et son historique ?", hostname=dev['hostname'] or dev['ip'])) \
                 != QMessageBox.StandardButton.Yes:
             return
         try:
             history.forget(dev)
         except (sqlite3.Error, OSError) as e:
-            QMessageBox.warning(self, "Panther", f"Impossible d'oublier l'appareil :\n{e}"); return
+            QMessageBox.warning(self, tr("Panther"), tr("Impossible d'oublier l'appareil :\n{e}", e=e)); return
         self.devices = [d for d in self.devices if d is not dev]
         self.selected = None if self.selected == dkey(dev) else self.selected
         self.rebuild(); self.update_count(); self.refresh_panel(); self.refresh_journal()
@@ -1633,7 +2508,7 @@ class Main(QMainWindow):
         try:
             ev = history.recent_events(500)
         except (sqlite3.Error, OSError):
-            log.warning("Journal des événements illisible", exc_info=True)
+            log.warning(tr("Journal des événements illisible"), exc_info=True)
             return
         t = self.journal
         t.setRowCount(len(ev))
@@ -1654,11 +2529,49 @@ class Main(QMainWindow):
         key = self.journal.item(row, 0).data(Qt.ItemDataRole.UserRole)
         n = self.nodes.get(key)
         if n:
-            self.tabs.setCurrentIndex(0); self.scene.clearSelection(); n.setSelected(True); self.view.centerOn(n)
+            self.tabs.setCurrentIndex(0); self.scene.clearSelection(); n.setSelected(True); self.view.centerOn(n.pos())
+
+    def open_welcome(self):
+        """Rouvre l'assistant : les choix s'appliquent tout de suite (sauf la langue, au prochain démarrage)."""
+        old_lang = i18n.language()
+        wiz = WelcomeWizard(parent=self)
+        accepted = wiz.exec()
+        v = wiz.values()
+        i18n.set_language(old_lang)  # l'assistant a pu changer la langue le temps de son affichage : on la rétablit
+        if not accepted:
+            return
+        apply_welcome_settings(self.settings, v)
+        self.set_theme_mode(v["theme"], save=False); self.set_text_size(v["text_size"], save=False)
+        self.depth.setCurrentIndex(max(self.depth.findData(v["depth"]), 0))
+        self.act_passive.setChecked(v["passive"]); self.toggle_passive(v["passive"])
+        self.security_on = v["security"] and not v["passive"]
+        self.act_security.setChecked(self.security_on)
+        self.security_consent = self.security_consent or self.security_on
+        self.refresh_security()
+        self.auto_actions[v["auto_minutes"]].setChecked(True); self.set_auto(v["auto_minutes"])
+        if v["language"] != old_lang:
+            QMessageBox.information(self, tr("Langue"), tr("La langue sera appliquée au prochain démarrage de Panther."))
+        self.status.setText(tr("Réglages enregistrés"))
+
+    def choose_language(self, code):
+        """Mémorise la langue ; elle s'applique au prochain démarrage (tous les textes sont construits au lancement)."""
+        if code == i18n.language() and self.settings.value("language", "") == code:
+            return
+        self.settings.setValue("language", code)
+        if code != i18n.language():
+            QMessageBox.information(self, tr("Langue"), tr("La langue sera appliquée au prochain démarrage de Panther."))
+
+    def toggle_passive(self, on):
+        self.passive_on = on
+        self.settings.setValue("passive", on)
+        self.depth.setEnabled(not on)
+        self.status.setText(tr("Écoute seule : Panther n'enverra plus rien sur le réseau (il lit la table des voisins du noyau et "
+                               "les baux DHCP)") if on
+                            else tr("Écoute seule désactivée"))
 
     def toggle_security(self, on):
         if on and not self.security_consent:
-            ok = QMessageBox.question(self, "Activer l'analyse de sécurité ?", SECURITY_INFO + "\n\nActiver l'analyse ?") \
+            ok = QMessageBox.question(self, tr("Activer l'analyse de sécurité ?"), SECURITY_INFO + tr("\n\nActiver l'analyse ?")) \
                 == QMessageBox.StandardButton.Yes
             if not ok:
                 self.act_security.setChecked(False); return
@@ -1666,7 +2579,7 @@ class Main(QMainWindow):
             self.settings.setValue("security_consent", True)
         self.security_on = on
         self.settings.setValue("security", on)
-        self.status.setText("Analyse de sécurité activée : elle sera effectuée au prochain scan" if on else "Analyse de sécurité désactivée")
+        self.status.setText(tr("Analyse de sécurité activée : elle sera effectuée au prochain scan") if on else tr("Analyse de sécurité désactivée"))
         self.refresh_security()
 
     def refresh_security(self):
@@ -1677,7 +2590,7 @@ class Main(QMainWindow):
         t.setRowCount(len(rows))
         for r, (f, d) in enumerate(rows):
             cells = [security.LABELS[f["severity"]], d["hostname"] or d["ip"], d["ip"],
-                     f["title"] + (f"  (port {f['port']})" if f.get("port") else ""), f["remedy"]]
+                     f["title"] + (tr("  (port {port})", port=f['port']) if f.get("port") else ""), f["remedy"]]
             for c, v in enumerate(cells):
                 it = QTableWidgetItem(v)
                 if c == 0:
@@ -1686,49 +2599,49 @@ class Main(QMainWindow):
                 if c == 4:
                     it.setForeground(QColor(T["mut"]))
                 if c == 3 and f["detail"]:
-                    it.setToolTip(f["detail"])
+                    it.setToolTip(tip(f["detail"]))
                 t.setItem(r, c, it)
         for c, w in enumerate((90, 180, 120, 380)):
             t.setColumnWidth(c, w)
         if not self.security_on:
-            self.sec_label.setText("L'analyse de sécurité est désactivée. Activez-la dans le menu Sécurité (lecture seule), puis lancez un scan.")
+            self.sec_label.setText(tr("L'analyse de sécurité est désactivée. Activez-la dans le menu Sécurité (lecture seule), puis lancez "
+                                      "un scan."))
         elif not analysed:
-            self.sec_label.setText("Lancez un scan pour analyser l'exposition des appareils.")
+            self.sec_label.setText(tr("Lancez un scan pour analyser l'exposition des appareils."))
         elif not rows:
-            self.sec_label.setText(f"Aucun constat sur {len(analysed)} appareil(s) analysé(s).")
+            self.sec_label.setText(tr("Aucun constat sur {analysed_count} appareil(s) analysé(s).", analysed_count=len(analysed)))
         else:
             c = security.count_by_severity(analysed)
-            self.sec_label.setText(f"{len(rows)} constat(s) sur {len({dkey(d) for _, d in rows})} appareil(s) "
-                                   f"({len(analysed)} analysés) : " + " · ".join(f"{n} {security.LABELS[sv].lower()}" for sv, n in c.items() if n)
-                                   + "   —   double-clic pour voir l'appareil sur la carte.")
+            self.sec_label.setText(tr("{rows_count} constat(s) sur {value_count} appareil(s) ({analysed_count} analysés) : ", rows_count=len(rows), value_count=len({dkey(d) for _, d in rows}), analysed_count=len(analysed)) + " · ".join(f"{n} {security.LABELS[sv].lower()}" for sv, n in c.items() if n)
+                                   + tr("   —   double-clic pour voir l'appareil sur la carte."))
 
     def security_open(self, row, _col):
         key = self.sec_table.item(row, 0).data(KEY_ROLE)
         n = self.nodes.get(key)
         if n:
-            self.tabs.setCurrentIndex(0); self.scene.clearSelection(); n.setSelected(True); self.view.centerOn(n)
+            self.tabs.setCurrentIndex(0); self.scene.clearSelection(); n.setSelected(True); self.view.centerOn(n.pos())
 
     def export_security(self):
         if not any(d.get("security") is not None for d in self.devices):
-            QMessageBox.information(self, "Rapport", "Aucun résultat d'analyse : activez l'analyse de sécurité (menu Sécurité) puis lancez un scan.")
+            QMessageBox.information(self, tr("Rapport"), tr("Aucun résultat d'analyse : activez l'analyse de sécurité (menu Sécurité) puis lancez un scan."))
             return
-        path, _ = QFileDialog.getSaveFileName(self, "Exporter le rapport", "rapport-securite.md", "Markdown (*.md)")
+        path, _ = QFileDialog.getSaveFileName(self, tr("Exporter le rapport"), "rapport-securite.md", "Markdown (*.md)")
         if path:
             with open(path, "w", encoding="utf-8") as f:
                 f.write(security.report_markdown(self.devices, [n["cidr"] for n in self.networks_info]))
-            self.status.setText(f"Rapport exporté : {os.path.basename(path)}")
+            self.status.setText(tr("Rapport exporté : {basename}", basename=os.path.basename(path)))
 
     def update_count(self):
         on = sum(1 for d in self.devices if d.get("online", True))
         off = len(self.devices) - on
-        self.count.setText(f"{on} en ligne" + (f"  ·  {off} hors ligne" if off else "") + "   ")
+        self.count.setText(tr("{on} en ligne", on=on) + (tr("  ·  {off} hors ligne", off=off) if off else "") + "   ")
 
     def set_auto(self, minutes):
         self.settings.setValue("auto_minutes", minutes)
         self.auto_timer.stop()
         if minutes:
             self.auto_timer.start(minutes * 60000)
-        self.auto_label.setText(f"Scan auto : toutes les {minutes} min   " if minutes else "")
+        self.auto_label.setText(tr("Scan auto : toutes les {minutes} min   ", minutes=minutes) if minutes else "")
 
     def auto_tick(self):
         if self.scanner.snapshot()["status"] != "scanning":
@@ -1773,6 +2686,8 @@ class Main(QMainWindow):
             self.saved_pos = {}
         if self.layout_mode == "hierarchique":
             self.build_hier()
+        elif self.layout_mode == "types":
+            self.build_types()
         else:
             self.build_star()
         kinds = {}
@@ -1786,6 +2701,17 @@ class Main(QMainWindow):
         if len(self.devices) <= 2:
             self.fit()
         self.view.viewport().update()
+
+    def build_types(self):
+        """Un amas par type d'appareil, sans liens : pour voir d'un coup ce que le réseau contient."""
+        pos, clusters = layout.type_clusters(self.devices)
+        self._live_ok = False
+        for c in clusters:
+            zone = Zone(c["r"], f"{LABELS.get(c['kind'], c['kind'])}  ·  {c['count']}")
+            zone.setPos(c["x"], c["y"]); self.scene.addItem(zone)
+        for d in self.devices:
+            if dkey(d) in pos:
+                self.add_node(d, *pos[dkey(d)])
 
     def build_hier(self):
         """Internet → box → switch(s) → appareils ; autres réseaux à la suite du chemin traceroute."""
@@ -1852,7 +2778,7 @@ class Main(QMainWindow):
             za = -math.pi / 2 + (zi + 1) * 2 * math.pi / (len(groups) + 1)
             zc = QPointF(dist * 1.25 * math.cos(za), dist * math.sin(za))
             vlan = (info.get(cidr) or {}).get("vlan")
-            zone = Zone(rz + 70, cidr + (f"  ·  VLAN {vlan}" if vlan else "") + ("" if devs else "  ·  aucun appareil")); zone.setPos(zc); self.scene.addItem(zone)
+            zone = Zone(rz + 70, cidr + (f"  ·  VLAN {vlan}" if vlan else "") + ("" if devs else tr("  ·  aucun appareil"))); zone.setPos(zc); self.scene.addItem(zone)
             hub = Hub(); hub.setPos(zc); self.scene.addItem(hub)
             if router:
                 self.scene.addItem(Link(router, hub, True, dashed=True))
@@ -1872,10 +2798,10 @@ class Main(QMainWindow):
         try:
             history.clear_positions(self.layout_mode)
         except (sqlite3.Error, OSError) as e:
-            QMessageBox.warning(self, "Panther", f"Impossible de réinitialiser les positions :\n{e}"); return
+            QMessageBox.warning(self, tr("Panther"), tr("Impossible de réinitialiser les positions :\n{e}", e=e)); return
         if self.devices:
             self.rebuild(); self.fit()
-        self.status.setText("Positions de cette disposition réinitialisées")
+        self.status.setText(tr("Positions de cette disposition réinitialisées"))
 
     @staticmethod
     def exposure_item(d):
@@ -1895,7 +2821,8 @@ class Main(QMainWindow):
         vals = [name, ip, SortItem(d["mac"]), SortItem(d["vendor"]), SortItem(LABELS.get(d["type"], "")),
                 SortItem(d["os"]), SortItem(", ".join(d["services"])),
                 SortItem(d.get("network", "")), SortItem(status_text(d)),
-                SortItem("De confiance" if d.get("trusted") else ""), self.exposure_item(d)]
+                SortItem(tr("De confiance") if d.get("trusted") else ""), self.exposure_item(d),
+                SortItem(d.get("group", "")), SortItem(", ".join(d.get("tags", [])))]
         for c, it in enumerate(vals):
             if c in (1, 2):
                 it.setFont(QFont("monospace", 9))
@@ -1964,10 +2891,21 @@ class Main(QMainWindow):
         self.view.viewport().update()
 
     def apply_filter(self):
-        q = self.search.text().strip().lower()
+        toks = self.search.text().strip().lower().split()
         def match(d):
-            hay = " ".join([d["ip"], d.get("network", ""), status_text(d), "de confiance" if d.get("trusted") else "non vérifié", security.worst(d.get("security")), d["mac"], d["vendor"], d["hostname"], d["os"], LABELS.get(d["type"], ""), " ".join(d["services"])]).lower()
-            return all(w in hay for w in q.split())
+            hay = " ".join([d["ip"], d.get("network", ""), status_text(d), tr("de confiance") if d.get("trusted") else tr("non vérifié"), security.worst(d.get("security")), d["mac"], d["vendor"], d["hostname"], d["os"], LABELS.get(d["type"], ""), " ".join(d["services"]),
+                            d.get("group", ""), " ".join(d.get("tags", [])), d.get("note", "")]).lower()
+            tags = [t.lower() for t in d.get("tags", [])]
+            for t in toks:
+                if t.startswith("tag:"):                       # tag:enfants : étiquette exacte
+                    if t[4:] not in tags:
+                        return False
+                elif t.startswith(("groupe:", "group:")):      # groupe:salon : le groupe contient ce texte
+                    if t.split(":", 1)[1] not in d.get("group", "").lower():
+                        return False
+                elif t not in hay:
+                    return False
+            return True
         for d in self.devices:
             n = self.nodes.get(dkey(d))
             if n:
@@ -1996,7 +2934,9 @@ class Main(QMainWindow):
             items = self.scene.selectedItems()
         except RuntimeError:  # scène détruite à la fermeture
             return
-        self.selected = dkey(items[0].dev) if items else None
+        real = [i for i in items if not i.dev.get("virtual")]
+        self.selected_keys = [dkey(i.dev) for i in real]
+        self.selected = self.selected_keys[0] if len(real) == 1 else (dkey(items[0].dev) if items and not real else None)
         self.sync_table(self.selected); self.refresh_panel()
 
     def on_table_selection(self):
@@ -2005,7 +2945,7 @@ class Main(QMainWindow):
             return
         n = self.nodes.get(self.table.item(rows[0].row(), 0).data(KEY_ROLE))
         if n:
-            self.scene.clearSelection(); n.setSelected(True); self.view.centerOn(n)
+            self.scene.clearSelection(); n.setSelected(True); self.view.centerOn(n.pos())
 
     def sync_table(self, key):
         self.table.blockSignals(True)
@@ -2029,128 +2969,222 @@ class Main(QMainWindow):
 
     def add_finding_row(self, f):
         k = QLabel(security.LABELS[f["severity"]]); k.setStyleSheet(f"color: {sev_color(f['severity'])}; font-weight: 600;")
-        text = f["title"] + (f"  (port {f['port']})" if f.get("port") else "") + (f"\nÀ faire : {f['remedy']}" if f["remedy"] else "")
+        text = f["title"] + (tr("  (port {port})", port=f['port']) if f.get("port") else "") + (tr("\nÀ faire : {remedy}", remedy=f['remedy']) if f["remedy"] else "")
         v = QLabel(text); v.setTextFormat(Qt.TextFormat.PlainText); v.setWordWrap(True)
         v.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         if f["detail"]:
-            v.setToolTip(f["detail"])
+            v.setToolTip(tip(f["detail"]))
         self.form.addRow(k, v)
+
+    def on_trust_button(self):
+        if len(self.selected_keys) > 1:
+            self.trust_selection()
+        else:
+            self.toggle_trust(self.current_device())
+
+    def on_meta_button(self):
+        if len(self.selected_keys) > 1:
+            self.edit_meta_selection()
+        else:
+            self.edit_meta(self.current_device())
+
+    def trust_selection(self):
+        """Sélection multiple : si tous sont de confiance on retire la confiance, sinon on l'accorde à tous."""
+        devs = self.selected_devices()
+        if not devs:
+            return
+        flag = not all(d.get("trusted") for d in devs)
+        try:
+            history.set_trusted(devs, flag)
+        except (sqlite3.Error, OSError) as e:
+            QMessageBox.warning(self, tr("Panther"), tr("Impossible d'enregistrer la confiance :\n{e}", e=e)); return
+        self.refresh_views(); self.refresh_journal()
+        self.status.setText(tr("{count} marqués de confiance", count=plural(len(devs), "appareil", "appareils")) if flag
+                            else tr("Confiance retirée à {count}", count=plural(len(devs), "appareil", "appareils")))
+
+    def edit_meta_selection(self):
+        devs = self.selected_devices()
+        if not devs:
+            return
+        try:
+            groups = history.meta_groups()
+        except (sqlite3.Error, OSError):
+            groups = []
+        dlg = MetaDialog(devs[0], groups, self, count=len(devs))
+        if not dlg.exec():
+            return
+        group, tags, _note = dlg.values()
+        added = [t for t in tags.replace(";", ",").split(",") if t.strip()]
+        try:
+            for d in devs:
+                history.set_meta(d, tags=list(d.get("tags", [])) + added if added else None, group=group if group.strip() else None)
+        except (sqlite3.Error, OSError) as e:
+            QMessageBox.warning(self, tr("Panther"), tr("Impossible d'enregistrer :\n{e}", e=e)); return
+        self.refresh_views()
+        self.status.setText(tr("Étiquettes et groupe enregistrés pour {count}", count=plural(len(devs), "appareil", "appareils")))
+
+    def refresh_multi_panel(self, devs):
+        """Panneau d'une sélection multiple : résumé par type, liste des appareils, actions groupées."""
+        kinds = {}
+        for d in devs:
+            kinds[d["type"]] = kinds.get(d["type"], 0) + 1
+        self.edit_btn.setVisible(False); self.trust_btn.setVisible(True); self.meta_btn.setVisible(True)
+        self.trust_btn.setText(tr("Retirer la confiance à la sélection") if all(d.get("trusted") for d in devs)
+                               else tr("Marquer la sélection comme de confiance"))
+        self.meta_btn.setText(tr("Étiquettes et groupe de la sélection…"))
+        self.side_icon.setPixmap(type_pixmap("net", 40))
+        self.side_title.setText(tr("{count} sélectionnés", count=plural(len(devs), "appareil", "appareils")))
+        self.side_sub.setText("  ·  ".join(f"{LABELS.get(k, k)} {n}" for k, n in sorted(kinds.items(), key=lambda kv: -kv[1])))
+        self.add_row(tr("Appareils"), "\n".join(f"• {d['hostname'] or d['ip']}  ({d['ip']})" for d in devs[:15]) + ("\n…" if len(devs) > 15 else ""))
+        self.add_row(tr("Confiance"), tr("{trusted} sur {total} de confiance", trusted=sum(1 for d in devs if d.get("trusted")), total=len(devs)))
+        groups = sorted({d.get("group", "") for d in devs if d.get("group")})
+        self.add_row(tr("Groupe"), ", ".join(groups))
+        worst = max((security.worst(d.get("security")) for d in devs if d.get("security")), key=lambda w: security.RANK.get(w, -1), default="")
+        if worst:
+            self.add_row(tr("Exposition"), tr("Gravité maximale : {severity}", severity=security.LABELS[worst]))
 
     def refresh_panel(self):
         while self.form.rowCount():
             self.form.removeRow(0)
+        self.meta_btn.setText(tr("Étiquettes, notes et groupe…"))
+        if len(self.selected_keys) > 1:
+            self.refresh_multi_panel(self.selected_devices())
+            return
         d = self.current_device()
-        self.edit_btn.setVisible(bool(d)); self.trust_btn.setVisible(bool(d))
+        self.edit_btn.setVisible(bool(d)); self.trust_btn.setVisible(bool(d)); self.meta_btn.setVisible(bool(d))
         if d:
-            self.trust_btn.setText("Retirer la confiance" if d.get("trusted") else "Marquer comme appareil de confiance")
+            self.trust_btn.setText(tr("Retirer la confiance") if d.get("trusted") else tr("Marquer comme appareil de confiance"))
         if d:
             self.side_icon.setPixmap(type_pixmap(d["type"], 40))
             self.side_title.setText(d["hostname"] or d["ip"])
             self.side_sub.setText(LABELS.get(d["type"], ""))
             if not d.get("online", True):
-                self.add_row("Statut", f"Hors ligne · dernière apparition le {time.strftime('%d/%m/%Y %H:%M', time.localtime(d['last_seen']))}")
+                self.add_row(tr("Statut"), tr("Hors ligne · dernière apparition le {date}", date=when(d['last_seen'])))
             elif d.get("new"):
-                self.add_row("Statut", "Nouvel appareil (première apparition)")
-            self.add_row("Adresse IP", d["ip"], True)
-            self.add_row("Adresse MAC", d["mac"], True)
-            self.add_row("Réseau", d.get("network", "") + (f"  ·  VLAN {d['vlan']}" if d.get("vlan") else ""), True)
-            self.add_row("Fabricant", d["vendor"])
+                self.add_row(tr("Statut"), tr("Nouvel appareil (première apparition)"))
+            self.add_row(tr("Adresse IP"), d["ip"], True)
+            self.add_row(tr("Adresse MAC"), d["mac"], True)
+            self.add_row(tr("Réseau"), d.get("network", "") + (tr("  ·  VLAN {vlan}", vlan=d['vlan']) if d.get("vlan") else ""), True)
+            self.add_row(tr("Fabricant"), d["vendor"])
             c = d.get("cert") or {}
             if c:
-                who = c.get("cn") or c.get("o") or "certificat sans nom"
-                self.add_row("Certificat HTTPS", who + (f"  ·  émis par {c['issuer']}" if c.get("issuer") and not c.get("self_signed") else "  ·  auto-signé")
-                             + (f"  ·  expiré le {c['not_after']}" if c.get("expired") else f"  ·  expire le {c['not_after']}" if c.get("not_after") else ""))
+                who = c.get("cn") or c.get("o") or tr("certificat sans nom")
+                self.add_row(tr("Certificat HTTPS"), who + (tr("  ·  émis par {issuer}", issuer=c['issuer']) if c.get("issuer") and not c.get("self_signed") else tr("  ·  auto-signé"))
+                             + (tr("  ·  expiré le {not_after}", not_after=c['not_after']) if c.get("expired") else tr("  ·  expire le {not_after}", not_after=c['not_after']) if c.get("not_after") else ""))
             if d.get("switch_port"):
-                self.add_row("Switch", f"{d.get('switch', '')}  ·  {d['switch_port']}")
+                self.add_row(tr("Switch"), tr("{switch}  ·  {switch_port}", switch=d.get('switch', ''), switch_port=d['switch_port']))
             if d.get("path"):
-                self.add_row("Chemin", "  →  ".join(h or "*" for h in d["path"]), True)
-            self.add_row("Modèle", models.describe(d.get("model", "")))
-            self.add_row("Système", d["os"])
-            self.add_row("TTL", str(d["ttl"]) if d["ttl"] else "")
-            self.add_row("Services", "  ·  ".join(d["services"]))
-            self.add_row("Ports", ", ".join(map(str, d["ports"])), True)
+                self.add_row(tr("Chemin"), "  →  ".join(h or "*" for h in d["path"]), True)
+            self.add_row(tr("Modèle"), models.describe(d.get("model", "")))
+            self.add_row(tr("Système"), d["os"])
+            self.add_row(tr("TTL"), str(d["ttl"]) if d["ttl"] else "")
+            self.add_row(tr("Services"), "  ·  ".join(d["services"]))
+            self.add_row(tr("Ports"), ", ".join(map(str, d["ports"])), True)
             for p, b in d["banners"].items():
-                self.add_row(f"Port {p}", b)
+                self.add_row(tr("Port {p}", p=p), b)
             if d.get("mdns_services"):
-                self.add_row("Annonces", "\n".join(d["mdns_services"]), True)
+                self.add_row(tr("Annonces"), "\n".join(d["mdns_services"]), True)
             if d["type"] != "unknown" or d.get("reasons"):
                 conf = d.get("confidence", 0)
-                self.add_row("Détection", f"{LABELS.get(d['type'], '')} · confiance {fingerprint.confidence_label(conf)} ({conf} %)")
-                self.add_row("Indices", "\n".join("• " + r for r in d.get("reasons", [])))
+                self.add_row(tr("Détection"), tr("{labels_label} · confiance {confidence_label} ({conf} %)", labels_label=LABELS.get(d['type'], ''), confidence_label=fingerprint.confidence_label(conf), conf=conf))
+                self.add_row(tr("Indices"), "\n".join("• " + r for r in d.get("reasons", [])))
             if d.get("light"):
-                self.add_row("Analyse", "Présence confirmée ; détails repris du dernier scan complet")
-            self.add_row("Confiance", "De confiance" if d.get("trusted") else "Non vérifié")
+                self.add_row(tr("Analyse"), tr("Présence confirmée ; détails repris du dernier scan complet"))
+            self.add_row(tr("Confiance"), tr("De confiance") if d.get("trusted") else tr("Non vérifié"))
+            self.add_row(tr("Groupe"), d.get("group", ""))
+            self.add_row(tr("Étiquettes"), "  ·  ".join(d.get("tags", [])))
+            self.add_row(tr("Notes"), d.get("note", ""))
             if d.get("security") is not None:
                 if d["security"]:
                     for f in d["security"]:
                         self.add_finding_row(f)
                 else:
-                    self.add_row("Exposition", "Aucun constat")
+                    self.add_row(tr("Exposition"), tr("Aucun constat"))
             try:
                 h = history.device_summary(d)
             except (sqlite3.Error, OSError):
                 h = None
             if h:
-                self.add_row("Première apparition", when(h["first_seen"]))
-                self.add_row("Dernière apparition", "à l'instant" if d.get("online", True) else when(h["last_seen"]))
+                self.add_row(tr("Première apparition"), when(h["first_seen"]))
+                self.add_row(tr("Dernière apparition"), tr("à l'instant") if d.get("online", True) else when(h["last_seen"]))
                 if h["presence"]:
-                    k = QLabel("Présence"); k.setObjectName("key")
+                    k = QLabel(tr("Présence")); k.setObjectName("key")
                     self.form.addRow(k, PresenceBar(h["presence"]))
                 if h["uptime7"] is not None:
-                    self.add_row("Disponibilité", f"{h['uptime7']} % sur 7 jours")
+                    self.add_row(tr("Disponibilité"), tr("{uptime} % sur 7 jours", uptime=h['uptime7']))
                 if h["events"]:
-                    self.add_row("Historique", "\n".join(f"{when_short(e['ts'])}  {EVENT_LABELS.get(e['kind'], e['kind'])}"
+                    self.add_row(tr("Historique"), "\n".join(f"{when_short(e['ts'])}  {EVENT_LABELS.get(e['kind'], e['kind'])}"
                                                          + (f"  ({e['detail']})" if e["detail"] and e["kind"] != "first_seen" else "")
                                                          for e in h["events"]))
             if d["is_gateway"]:
-                self.add_row("Rôle", "Passerelle par défaut")
+                self.add_row(tr("Rôle"), tr("Passerelle par défaut"))
             if d["is_self"]:
-                self.add_row("Rôle", "Machine locale")
+                self.add_row(tr("Rôle"), tr("Machine locale"))
         else:
             self.side_icon.setPixmap(type_pixmap("router", 40))
-            self.side_title.setText("Réseau local")
-            self.side_sub.setText("Aucune sélection")
+            self.side_title.setText(tr("Réseau local"))
+            self.side_sub.setText(tr("Aucune sélection"))
             if self.network:
-                self.add_row("Sous-réseau", self.network["cidr"], True)
-                self.add_row("Passerelle", self.network["gateway"], True)
-                self.add_row("Interface", self.network["iface"], True)
+                self.add_row(tr("Sous-réseau"), self.network["cidr"], True)
+                self.add_row(tr("Passerelle"), self.network["gateway"], True)
+                self.add_row(tr("Interface"), self.network["iface"], True)
                 on = sum(1 for x in self.devices if x.get("online", True))
-                self.add_row("Appareils", f"{on} en ligne" + (f"  ·  {len(self.devices) - on} hors ligne" if len(self.devices) > on else ""))
+                self.add_row(tr("Appareils"), tr("{on} en ligne", on=on) + (tr("  ·  {devices_count} hors ligne", devices_count=len(self.devices) - on) if len(self.devices) > on else ""))
                 kinds = {}
                 for x in self.devices:
                     kinds[x["type"]] = kinds.get(x["type"], 0) + 1
                 for k, n in sorted(kinds.items(), key=lambda kv: -kv[1]):
                     self.add_row(LABELS[k], str(n))
                 if self.last_new:
-                    self.add_row("Nouveaux", "\n".join(self.last_new))
+                    self.add_row(tr("Nouveaux"), "\n".join(self.last_new))
                 if self.dup_suggestions:
-                    self.add_row("Doublons possibles", "\n".join(f"{n['hostname'] or n['ip']} ≈ {o['hostname'] or o['ip']} (hors ligne)"
+                    self.add_row(tr("Doublons possibles"), "\n".join(f"{n['hostname'] or n['ip']} ≈ {o['hostname'] or o['ip']} (hors ligne)"
                                                                  for n, o, _ in self.dup_suggestions))
                 if self.security_on and any(x.get("security") is not None for x in self.devices):
                     c = security.count_by_severity(self.devices)
-                    self.add_row("Sécurité", " · ".join(f"{n} {security.LABELS[sv].lower()}" for sv, n in c.items() if n) or "Aucun constat")
+                    self.add_row(tr("Sécurité"), " · ".join(f"{n} {security.LABELS[sv].lower()}" for sv, n in c.items() if n) or tr("Aucun constat"))
                 ex = self.scan_extra
                 for w_ in ex.get("warnings") or []:
-                    self.add_row("Attention", w_)
+                    self.add_row(tr("Attention"), w_)
                 for i in ex.get("snmp") or []:
-                    self.add_row("SNMP", f"{i['name'] or i['host']} : {i['arp']} entrées ARP, {i['fdb']} adresses MAC")
+                    self.add_row(tr("SNMP"), tr("{name} : {arp} entrées ARP, {fdb} adresses MAC", name=i['name'] or i['host'], arp=i['arp'], fdb=i['fdb']))
                 nb, st = ex.get("neighbors") or [], ex.get("neighbors_status")
                 if nb:
-                    self.add_row("Voisins", "\n".join(
+                    self.add_row(tr("Voisins"), "\n".join(
                         f"{n.get('name') or n.get('chassis') or n.get('src', '')}  ·  {n.get('port', '')}"
                         + (f"  ·  VLAN {n['vlan']}" if n.get("vlan") else "") + f"  ({n['proto']})" for n in nb))
                 elif st == "refusé":
-                    self.add_row("Voisins", "LLDP/CDP : droits insuffisants (voir le README).")
+                    self.add_row(tr("Voisins"), tr("LLDP/CDP : droits insuffisants (voir le README)."))
                 elif st == "ok":
-                    self.add_row("Voisins", "Aucun voisin LLDP/CDP annoncé.")
+                    self.add_row(tr("Voisins"), tr("Aucun voisin LLDP/CDP annoncé."))
             else:
-                self.add_row("", "Lancez un scan pour cartographier le réseau auquel vous êtes connecté.")
+                self.add_row("", tr("Lancez un scan pour cartographier le réseau auquel vous êtes connecté."))
 
     # ---------- divers ----------
-    def toggle_theme(self, light=None):
-        light = self.act_theme.isChecked()
-        self.apply_theme("light" if light else "dark")
-        self.settings.setValue("theme", "light" if light else "dark")
+    def set_theme_mode(self, mode, save=True):
+        """Thème : automatique (suit le système), sombre, clair ou contraste élevé."""
+        self.theme_mode = mode if mode in THEME_MODES else "auto"
+        if save:
+            self.settings.setValue("theme", self.theme_mode)
+        if self.theme_actions.get(self.theme_mode):
+            self.theme_actions[self.theme_mode].setChecked(True)
+        self.apply_theme(resolve_theme(self.theme_mode))
+
+    def on_system_theme(self, *_args):
+        if self.theme_mode == "auto":
+            self.apply_theme(resolve_theme("auto"))
+
+    def set_text_size(self, key, save=True):
+        """Taille du texte (petit, normal, grand, très grand) : interface et carte."""
+        self.text_size = key if key in self.size_actions else "normal"
+        if save:
+            self.settings.setValue("text_size", self.text_size)
+        self.size_actions[self.text_size].setChecked(True)
+        set_text_scale(text_scale_of(self.text_size))
+        QApplication.instance().setStyleSheet(make_style())
+        if self.devices:
+            self.rebuild()
+        self.refresh_panel(); self.view.viewport().update()
 
     def apply_theme(self, name):
         T.update(THEMES[name])
@@ -2161,13 +3195,40 @@ class Main(QMainWindow):
 
     def update_netlabel(self):
         n = len(self.targets)
-        self.net_btn.setText(f"Réseaux ({n + 1})" if n else "Réseaux…")
+        self.net_btn.setText(tr("Réseaux ({n})", n=n + 1) if n else tr("Réseaux…"))
         if self.network:
             vlan = f"  ·  VLAN {self.network['vlan']}" if self.network.get("vlan") else ""
-            extra = f"  ·  +{n} autre(s) réseau(x)" if n else ""
-            gw = f"  ·  passerelle {self.network['gateway']}" if self.network.get("gateway") else "  ·  sans passerelle"
+            extra = tr("  ·  +{n} autre(s) réseau(x)", n=n) if n else ""
+            gw = tr("  ·  passerelle {gateway}", gateway=self.network['gateway']) if self.network.get("gateway") else tr("  ·  sans passerelle")
             kind = f" ({networks.LINK_LABELS.get(self.network.get('kind'), '')})" if self.network.get("kind") else ""
-            self.netlabel.setText(f"  {self.network['cidr']}{vlan}{gw}  ·  {self.network['iface']}{kind}{extra}")
+            self.netlabel.setText(tr("  {cidr}{vlan}{gw}  ·  {iface}{kind}{extra}", cidr=self.network['cidr'], vlan=vlan, gw=gw, iface=self.network['iface'], kind=kind, extra=extra))
+
+    def load_snmp(self):
+        """Sources SNMP : les hôtes sont dans les réglages, les communautés dans le trousseau (`secrets`).
+        Une ancienne configuration (communauté en clair) est migrée vers le trousseau puis effacée des réglages."""
+        try:
+            raw = json.loads(self.settings.value("snmp", "[]"))
+            items = [(str(x["host"]), x.get("community")) for x in raw if isinstance(x, dict)]
+        except (ValueError, TypeError, KeyError, AttributeError):
+            return []
+        sources, legacy = [], False
+        for host, comm in items:
+            if comm is not None:
+                legacy = True
+                secrets.set(snmp_secret(host), str(comm))
+            sources.append({"host": host, "community": secrets.get(snmp_secret(host)) or ""})
+        if legacy:
+            self.save_snmp(sources, [])
+            log.info("Communautés SNMP déplacées dans %s", secrets.backend())
+        return sources
+
+    def save_snmp(self, sources, previous):
+        """Enregistre les hôtes (réglages) et les communautés (trousseau) ; oublie celles des hôtes retirés."""
+        for host in {s["host"] for s in previous} - {s["host"] for s in sources}:
+            secrets.delete(snmp_secret(host))
+        for s in sources:
+            secrets.set(snmp_secret(s["host"]), s["community"])
+        self.settings.setValue("snmp", json.dumps([{"host": s["host"]} for s in sources]))
 
     def open_networks(self):
         try:
@@ -2176,14 +3237,43 @@ class Main(QMainWindow):
             local = None
         dlg = NetworksDialog(local, self.targets, self.snmp, self)
         if dlg.exec():
+            previous = self.snmp
             self.targets, self.snmp = dlg.selected(), dlg.snmp_sources()
             self.settings.setValue("targets", json.dumps(self.targets))
-            self.settings.setValue("snmp", json.dumps(self.snmp))
+            self.save_snmp(self.snmp, previous)
             self.update_netlabel()
-            self.status.setText("Plages mises à jour : relancez le scan pour les prendre en compte.")
+            self.status.setText(tr("Plages mises à jour : relancez le scan pour les prendre en compte."))
 
     def current_device(self):
+        if len(self.selected_keys) > 1:
+            return None
         return next((x for x in self.devices if dkey(x) == self.selected), None)
+
+    def selected_devices(self):
+        keys = set(self.selected_keys)
+        return [d for d in self.devices if dkey(d) in keys]
+
+    def center_on_selection(self):
+        """Centre la carte sur l'appareil sélectionné (ou cadre la sélection multiple, sans zoom excessif)."""
+        nodes = [self.nodes[k] for k in (self.selected_keys or ([self.selected] if self.selected else [])) if k in self.nodes]
+        if not nodes:
+            self.status.setText(tr("Sélectionnez d'abord un appareil."))
+            return
+        self.view.auto_fit = False
+        if len(nodes) == 1:
+            self.view.centerOn(nodes[0].pos())
+            return
+        rect = nodes[0].sceneBoundingRect()
+        for n in nodes[1:]:
+            rect = rect.united(n.sceneBoundingRect())
+        self.view.fitInView(rect.adjusted(-60, -60, 60, 60), Qt.AspectRatioMode.KeepAspectRatio)
+        if self.view.transform().m11() > 1.3:                 # quelques appareils proches : pas de zoom écrasant
+            self.view.resetTransform(); self.view.centerOn(rect.center())
+
+    def select_all_nodes(self):
+        for n in self.nodes.values():
+            if not n.dev.get("virtual"):
+                n.setSelected(True)
 
     def table_device(self, row):
         it = self.table.item(row, 0) if row >= 0 else None
@@ -2193,17 +3283,20 @@ class Main(QMainWindow):
         if not dev or dev.get("virtual"):
             return
         menu = QMenu(self)
-        menu.addAction("Modifier le nom / le type…", lambda: self.edit_device(dev))
-        menu.addAction("Retirer la confiance" if dev.get("trusted") else "Marquer comme appareil de confiance",
+        menu.addAction(tr("Modifier le nom / le type…"), lambda: self.edit_device(dev))
+        menu.addAction(tr("Retirer la confiance") if dev.get("trusted") else tr("Marquer comme appareil de confiance"),
                        lambda: self.toggle_trust(dev))
-        menu.addAction("Créer une règle de détection…", lambda: self.create_rule(dev))
+        menu.addAction(tr("Étiquettes, notes et groupe…"), lambda: self.edit_meta(dev))
+        menu.addAction(tr("Créer une règle de détection…"), lambda: self.create_rule(dev))
         if any(d is not dev and not d.get("virtual") and d.get("online", True) != dev.get("online", True) for d in self.devices):
-            menu.addAction("Fusionner avec un appareil hors ligne…" if dev.get("online", True) else "Fusionner dans un appareil en ligne…",
+            menu.addAction(tr("Fusionner avec un appareil hors ligne…") if dev.get("online", True) else tr("Fusionner dans un appareil en ligne…"),
                            lambda: self.open_merge(dev))
+        if not dev.get("online", True) and dev.get("mac"):
+            menu.addAction(tr("Réveiller (Wake-on-LAN)"), lambda: self.wake_device(dev))
         if not dev.get("online", True):
-            menu.addAction("Oublier cet appareil", lambda: self.forget_device(dev))
+            menu.addAction(tr("Oublier cet appareil"), lambda: self.forget_device(dev))
         if dev.get("custom"):
-            menu.addAction("Rétablir la détection automatique", lambda: self.reset_device(dev))
+            menu.addAction(tr("Rétablir la détection automatique"), lambda: self.reset_device(dev))
         menu.exec(pos.toPoint() if hasattr(pos, "toPoint") else pos)
 
     def edit_device(self, dev):
@@ -2221,43 +3314,83 @@ class Main(QMainWindow):
         try:
             data = store.set_override(dev, name, kind)
         except OSError as e:
-            QMessageBox.warning(self, "Panther", f"Impossible d'enregistrer le réglage :\n{e}")
+            QMessageBox.warning(self, tr("Panther"), tr("Impossible d'enregistrer le réglage :\n{e}", e=e))
             return
         store.apply(dev, data)
         self.selected = dkey(dev)
         self.rebuild(); self.refresh_panel()
-        self.status.setText("Réglage enregistré" if (name or kind) else "Détection automatique rétablie")
+        self.status.setText(tr("Réglage enregistré") if (name or kind) else tr("Détection automatique rétablie"))
 
     def export(self, fmt):
         if not self.devices:
-            QMessageBox.information(self, "Export", "Aucun résultat à exporter : lancez d'abord un scan.")
+            QMessageBox.information(self, tr("Export"), tr("Aucun résultat à exporter : lancez d'abord un scan."))
             return
-        path, _ = QFileDialog.getSaveFileName(self, "Exporter", f"panther-scan.{fmt}", f"*.{fmt}")
+        path, _ = QFileDialog.getSaveFileName(self, tr("Exporter"), f"panther-scan.{fmt}", f"*.{fmt}")
         if not path:
             return
+        try:
+            self.write_export(path, fmt)
+        except OSError as e:
+            QMessageBox.warning(self, tr("Panther"), tr("Export impossible :\n{e}", e=e)); return
+        self.status.setText(tr("Exporté : {basename}", basename=os.path.basename(path)))
+
+    def write_export(self, path, fmt):
+        """CSV ou JSON complet (confiance, groupe, étiquettes, notes, historique, exposition, certificat…)."""
+        text = exporter.to_json(self.devices, [n["cidr"] for n in self.networks_info]) if fmt == "json" else exporter.to_csv(self.devices)
         with open(path, "w", encoding="utf-8", newline="") as f:
-            if fmt == "json":
-                json.dump(self.devices, f, indent=2, ensure_ascii=False)
-            else:
-                w = csv.writer(f)
-                w.writerow(["ip", "nom", "type", "mac", "fabricant", "os", "services"])
-                for d in self.devices:
-                    w.writerow([d["ip"], d["hostname"], LABELS.get(d["type"], ""), d["mac"], d["vendor"], d["os"], " ".join(d["services"])])
-        self.status.setText(f"Exporté : {os.path.basename(path)}")
+            f.write(text)
 
 
-def main():
-    fingerprint.load_extra_oui(os.path.join(os.path.dirname(os.path.abspath(__file__)), "oui.txt"))
+def start_demo(w):
+    """Charge le réseau fictif : trois scans passés dans l'historique temporaire, puis le dernier affiché."""
+    from . import demo
+    demo.seed_history()
+    w.notify = lambda *a: None
+    w.network, w.networks_info, w.scan_extra = dict(demo.NETWORK), demo.NETS, demo.extra()
+    w.targets = [demo.VLAN]
+    w.update_netlabel()
+    w.last_scan_auto = False
+    w.finish_scan({"devices": demo.online_devices(sec=w.security_on), "networks": demo.NETS, "depth": "normal"}, 0)
+    w.status.setText(tr("Démonstration : réseau fictif, rien n'est scanné ni envoyé. Lancez le scan pour voir la "
+                        "progression, essayez les cartes, le journal et la comparaison."))
+
+
+def main(demo=False, lang=None):
+    fingerprint.load_all_oui(os.path.dirname(os.path.abspath(__file__)))
     app = QApplication(sys.argv)
+    settings = QSettings("Panther", "Panther")
+    # langue : --lang, sinon le choix enregistré (menu Affichage), sinon celle du système
+    saved = settings.value("language", "")
+    i18n.set_language(lang or (saved if saved in i18n.LANGUAGES else i18n.detect()))
     app.setStyle("Fusion")
     app.setApplicationName("Panther")
     app.setDesktopFileName("panther")
     app.setWindowIcon(QIcon(os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "panther.svg")))
-    w = Main()
-    theme = w.settings.value("theme", "dark")
-    w.act_theme.setChecked(theme == "light")
-    T.update(THEMES["light" if theme == "light" else "dark"])
-    app.setStyleSheet(make_style())
+
+    def look():
+        """Apparence enregistrée, appliquée avant d'afficher quoi que ce soit : thème (auto = système) et taille du texte."""
+        mode, size = str(settings.value("theme", "auto")), str(settings.value("text_size", "normal"))
+        set_text_scale(text_scale_of(size))
+        T.update(THEMES[resolve_theme(mode if mode in THEME_MODES else "auto")])
+        app.setStyleSheet(make_style())
+    look()
+    if not demo and first_run_needed(settings):
+        wiz = WelcomeWizard(settings)
+        if wiz.exec():
+            apply_welcome_settings(settings, wiz.values())
+        else:
+            settings.setValue("welcome_done", True)  # « Passer » : valeurs par défaut, et on ne redemande pas
+            settings.setValue("language", i18n.language())
+        look()
+    if demo:
+        from . import demo as demo_mod
+        w = Main(scanner=demo_mod.DemoScanner(), demo=True)
+        start_demo(w)
+        import signal
+        signal.signal(signal.SIGTERM, lambda *a: app.quit())  # le dossier temporaire est supprimé même si on arrête le processus
+        wake = QTimer(); wake.timeout.connect(lambda: None); wake.start(500)  # laisse Python traiter le signal
+    else:
+        w = Main()
     w.refresh_panel()
     w.show()
     sys.exit(app.exec())

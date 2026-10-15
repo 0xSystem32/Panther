@@ -14,12 +14,13 @@ const ICONS = { // tracés 24x24
   iot:'<circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/>',
   unknown:'<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 114 2c-.9.6-1.5 1-1.5 2M12 17h.01"/>'
 };
-const LABELS = {desktop:'Ordinateur',laptop:'Portable',phone:'Téléphone',tablet:'Tablette',console:'Console de jeux',speaker:'Enceinte connectée',printer:'Imprimante',
-  router:'Routeur / box',tv:'TV / multimédia',camera:'Caméra',server:'Serveur',nas:'NAS',iot:'Objet connecté',unknown:'Inconnu'};
+let S = {labels: {}};   // textes traduits, fournis par le serveur (/api/strings)
+const fmt = (t, o) => String(t).replace(/\{(\w+)\}/g, (_, k) => esc(o[k]));
+const LABEL = t => S.labels[t] || S.labels.unknown || t;
 const svg = document.getElementById('map'), panel = document.getElementById('panel');
 let devices = [], selected = null, timer = null;
 
-const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const ico = (t, x, y, s) => `<svg class="ico" x="${x-s/2}" y="${y-s/2}" width="${s}" height="${s}" viewBox="0 0 24 24">${ICONS[t]||ICONS.unknown}</svg>`;
 
 function draw() {
@@ -39,8 +40,8 @@ function draw() {
   for (const d of devices) { const [x, y] = pos.get(d.ip);
     const r = d.is_self || d.is_gateway ? 34 : 28;
     const name = d.hostname || d.ip;
-    html += `<g class="node ${selected===d.ip?'sel':''}" data-ip="${d.ip}"><circle cx="${x}" cy="${y}" r="${r}"/>${ico(d.type,x,y,r)}
-      <text x="${x}" y="${y+r+16}">${esc(name.slice(0,22))}</text><text class="sub" x="${x}" y="${y+r+30}">${d.is_self?'cette machine':esc(d.ip)}</text></g>`; }
+    html += `<g class="node ${selected===d.ip?'sel':''}" data-ip="${esc(d.ip)}"><circle cx="${x}" cy="${y}" r="${r}"/>${ico(d.type,x,y,r)}
+      <text x="${x}" y="${y+r+16}">${esc(name.slice(0,22))}</text><text class="sub" x="${x}" y="${y+r+30}">${d.is_self?esc(S.this_machine):esc(d.ip)}</text></g>`; }
   svg.innerHTML = html;
   svg.querySelectorAll('.node').forEach(n => n.onclick = () => { selected = n.dataset.ip; draw(); details(); });
 }
@@ -49,26 +50,32 @@ function details() {
   const d = devices.find(x => x.ip === selected); if (!d) return;
   const row = (k, v) => v ? `<dt>${k}</dt><dd>${v}</dd>` : '';
   panel.innerHTML = `<h2>${esc(d.hostname || d.ip)}</h2><dl>
-    ${row('Type', LABELS[d.type])}${row('Adresse IP', d.ip)}${row('MAC', esc(d.mac))}${row('Fabricant', esc(d.vendor))}
-    ${row('OS', esc(d.os))}${row('TTL', d.ttl)}
-    ${row('Services', d.services.map(s => `<span class="tag">${esc(s)}</span>`).join(''))}
-    ${row('Bannières', Object.entries(d.banners).map(([p, b]) => `${p}: ${esc(b)}`).join('<br>'))}</dl>`;
+    ${row(S.type, esc(LABEL(d.type)))}${row(S.ip, esc(d.ip))}${row(S.mac, esc(d.mac))}${row(S.vendor, esc(d.vendor))}
+    ${row(S.os, esc(d.os))}${row('TTL', esc(d.ttl))}
+    ${row(S.services, d.services.map(s => `<span class="tag">${esc(s)}</span>`).join(''))}
+    ${row(S.banners, Object.entries(d.banners).map(([p, b]) => `${p}: ${esc(b)}`).join('<br>'))}</dl>`;
 }
 
 async function poll() {
   const s = await (await fetch('/api/state')).json();
   devices = s.devices; draw(); if (selected) details();
   document.getElementById('fill').style.width = s.progress + '%';
-  document.getElementById('net').textContent = s.network ? `${s.network.cidr} · passerelle ${s.network.gateway}` : '';
-  document.getElementById('count').textContent = `${devices.length} appareil(s)`;
+  document.getElementById('net').textContent = s.network ? fmt(S.network, {cidr: s.network.cidr, gateway: s.network.gateway}) : '';
+  document.getElementById('count').textContent = fmt(S.count, {n: devices.length});
   const btn = document.getElementById('scan'), busy = s.status === 'scanning';
-  btn.disabled = busy; btn.textContent = busy ? `Scan en cours… ${s.progress}%` : 'Lancer le scan';
-  if (s.status === 'error') panel.innerHTML = `<p class="hint">Erreur : ${esc(s.error)}</p>`;
+  btn.disabled = busy; btn.textContent = busy ? fmt(S.scanning, {progress: s.progress}) : S.scan;
+  if (s.status === 'error') panel.innerHTML = `<p class="hint">${fmt(S.error, {error: s.error})}</p>`;
   if (!busy && timer) { clearInterval(timer); timer = null; }
 }
 document.getElementById('scan').onclick = async () => {
   await fetch('/api/scan', {method: 'POST'}); selected = null;
-  panel.innerHTML = '<p class="hint">Scan en cours, les appareils apparaissent au fur et à mesure.</p>';
+  panel.innerHTML = `<p class="hint">${esc(S.scan_hint)}</p>`;
   timer = timer || setInterval(poll, 1000); poll();
 };
-poll();
+(async () => {
+  try { S = await (await fetch('/api/strings')).json(); } catch (e) { /* sans textes traduits : libellés vides */ }
+  document.documentElement.lang = S.lang || 'fr';
+  document.getElementById('scan').textContent = S.scan;
+  panel.innerHTML = `<p class="hint">${esc(S.hint)}</p>`;
+  poll();
+})();

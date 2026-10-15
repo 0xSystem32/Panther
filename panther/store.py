@@ -37,6 +37,14 @@ def _save(data):
     os.replace(tmp, PATH)  # écriture atomique : jamais de fichier à moitié écrit
 
 
+def erase():
+    """Supprime les noms et types choisis à la main. -> nombre d'appareils concernés."""
+    with _lock:
+        n = len(load())
+        _save({})
+    return n
+
+
 def move_override(src, dst, keep_src=False):
     """Reporte le réglage manuel de `src` sur `dst` (sans écraser un réglage existant). `keep_src` : copie au lieu de déplacer."""
     with _lock:

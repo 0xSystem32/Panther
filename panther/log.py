@@ -10,6 +10,8 @@ import os
 import sys
 import threading
 
+from . import privacy
+
 PATH = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"), "Panther", "panther.log")
 _FORMAT = "%(asctime)s %(levelname)-7s %(name)s: %(message)s"
 _OURS = "_panther_handler"
@@ -33,6 +35,7 @@ def setup(verbose=False, path=None, console=False):
         target = path or PATH
         os.makedirs(os.path.dirname(target), exist_ok=True)
         handlers.append(logging.handlers.RotatingFileHandler(target, maxBytes=256_000, backupCount=2, encoding="utf-8"))
+        privacy.harden(target)  # adresses et noms d'appareils : lisible par vous seul
     except OSError:  # dossier non inscriptible : le journal ne doit jamais empêcher de lancer l'application
         console = True
     if console or verbose:

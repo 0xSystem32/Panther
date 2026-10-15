@@ -6,6 +6,18 @@ plutôt que sur un nom deviné. Les modèles définis par l'utilisateur (`rules.
 import re
 
 from . import rules
+from .i18n import language
+
+_GEN = re.compile(r"\((\d+)e génération\)")
+
+
+def _ordinal(n):
+    return f"{n}{'th' if 10 <= n % 100 <= 20 else {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')}"
+
+
+def _localize(name):
+    """La table est écrite en français (« iPad (7e génération) ») : en anglais, « iPad (7th generation) »."""
+    return _GEN.sub(lambda m: f"({_ordinal(int(m.group(1)))} generation)", name) if language() == "en" else name
 
 _IPHONE = {
     "iPhone10,1": "iPhone 8", "iPhone10,4": "iPhone 8", "iPhone10,2": "iPhone 8 Plus", "iPhone10,5": "iPhone 8 Plus",
@@ -79,10 +91,10 @@ def friendly(identifier, rs=None):
         return {"name": um[0], "type": um[1], "source": "utilisateur"}
     if ident in EXACT:
         kind = next((t for p, t in _FAMILY_TYPE if ident.startswith(p)), None)
-        return {"name": EXACT[ident], "type": kind, "source": "table"}
+        return {"name": _localize(EXACT[ident]), "type": kind, "source": "table"}
     for rx, name, kind in FAMILIES:
         if rx.match(ident):
-            return {"name": f"{name} ({ident})" if name.startswith("Samsung") or name.startswith("TV") else name, "type": kind, "source": "famille"}
+            return {"name": _localize(f"{name} ({ident})" if name.startswith("Samsung") or name.startswith("TV") else name), "type": kind, "source": "famille"}
     return None
 
 

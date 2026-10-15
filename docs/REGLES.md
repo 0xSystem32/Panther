@@ -1,5 +1,7 @@
 # Règles de détection personnalisées
 
+[English](RULES.md) · **Français**
+
 Panther classe chaque appareil par **score** : plusieurs indices (ports, annonces mDNS/UPnP/WS-Discovery, fabricant,
 nom, modèle…) ajoutent des points à un type, le type qui en a le plus l'emporte. Vos règles ajoutent des indices
 supplémentaires, **sans toucher au code** : fichier `~/.config/Panther/rules.json`

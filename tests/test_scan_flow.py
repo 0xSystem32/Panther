@@ -133,7 +133,8 @@ class ScanFlowTests(unittest.TestCase):
     def test_all_profiles_are_complete(self):
         keys = set(scanner.PROFILES["normal"])
         for name, p in scanner.PROFILES.items():
-            self.assertEqual(set(p), keys, name)
+            self.assertEqual(set(p) - {"passive"}, keys, name)  # « passive » : seulement l'écoute seule
+            self.assertEqual("passive" in p, name == "ecoute", name)
         self.assertLess(len(scanner.PROFILES["rapide"]["scan_ports"]), len(scanner.PROFILES["normal"]["scan_ports"]))
         self.assertGreater(len(scanner.PROFILES["approfondi"]["scan_ports"]), len(scanner.PROFILES["normal"]["scan_ports"]))
 

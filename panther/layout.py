@@ -5,9 +5,11 @@ Panther sait vraiment (passerelle, port de switch lu en SNMP, voisins LLDP/CDP, 
 `hierarchical_positions` en calcule une disposition lisible. Sans information de switch, les appareils
 sont simplement rattachés à la passerelle : on ne dessine jamais un lien qu'on ne connaît pas.
 """
+import math
 from collections import defaultdict
 
 from . import store
+from .i18n import tr
 
 
 def dkey(d):
@@ -109,14 +111,14 @@ def build_tree(devices, local_cidr, networks_info=(), paths=None, neighbors=(), 
             if hop is None:
                 if not t.nodes[parent]["kind"] == "gap":
                     gap += 1
-                    parent = t.add(f"virt:gap:{cidr}:{gap}", "gap", "?", parent, sub="saut sans réponse", dashed=True)
+                    parent = t.add(f"virt:gap:{cidr}:{gap}", "gap", "?", parent, sub=tr("saut sans réponse"), dashed=True)
             elif hop in in_net or (gw and hop == gw["ip"]):
                 continue                      # la cible elle-même, ou la passerelle déjà dessinée
             elif hop in by_ip:                # un routeur du chemin qui est aussi un appareil scanné
                 parent = t.add(dkey(by_ip[hop]), "device", "", parent, dev=by_ip[hop])
             else:
                 parent = t.add(f"virt:hop:{hop}", "hop", hop, parent, sub="routeur", dashed=False)
-        net = t.add(f"virt:net:{cidr}", "net", _net_label(cidr, info), parent, sub="aucun appareil" if not groups[cidr] else "",
+        net = t.add(f"virt:net:{cidr}", "net", _net_label(cidr, info), parent, sub=tr("aucun appareil") if not groups[cidr] else "",
                     dashed=not groups[cidr])
         for d in groups[cidr]:
             t.add(dkey(d), "device", "", net, dev=d)
@@ -163,3 +165,52 @@ def hierarchical_positions(tree, col_w=135, row_h=155, max_cols=8):
         mid = (min(xs) + max(xs)) / 2
         pos = {k: (x - mid, y) for k, (x, y) in pos.items()}
     return pos
+
+
+def type_clusters(devices, spacing=100, gap=70):
+    """Disposition « regroupée par type » : un amas rond par type d'appareil (les plus nombreux d'abord), rangés en lignes.
+
+    -> (positions {clé: (x, y)}, amas [{kind, count, x, y, r}]) centrés sur (0, 0). Pure et déterministe : mêmes appareils, mêmes
+    positions. Les appareils d'un amas sont sur des anneaux de 6, 12, 18… places (un seul au centre)."""
+    groups = defaultdict(list)
+    for d in devices:
+        if not d.get("virtual"):
+            groups[d.get("type") or "unknown"].append(d)
+    order = sorted(groups.items(), key=lambda kv: (-len(kv[1]), kv[0]))
+    shapes = []                                   # (kind, devices, positions relatives, rayon de l'amas)
+    for kind, devs in order:
+        devs = sorted(devs, key=lambda d: (tuple(int(x) for x in d["ip"].split(".")) if d.get("ip", "").count(".") == 3 else (0,), dkey(d)))
+        n, rel = len(devs), []
+        if n == 1:
+            rel, radius = [(0.0, 0.0)], 0.0
+        elif n <= 6:
+            radius = max(spacing * 0.75, spacing * n / (2 * math.pi))
+            rel = [(radius * math.cos(-math.pi / 2 + i * 2 * math.pi / n), radius * math.sin(-math.pi / 2 + i * 2 * math.pi / n)) for i in range(n)]
+        else:
+            left, ring, rel = n, 1, []
+            while left > 0:
+                cap, radius = 6 * ring, spacing * ring
+                k = min(cap, left)
+                rel += [(radius * math.cos(-math.pi / 2 + i * 2 * math.pi / k), radius * math.sin(-math.pi / 2 + i * 2 * math.pi / k)) for i in range(k)]
+                left -= k; ring += 1
+        shapes.append((kind, devs, rel, max(radius, 0) + 75))
+    # rangement en lignes (étagères) : largeur visée = un rectangle un peu plus large que haut (carte facile à lire)
+    row_width = max(2 * max((sh[3] for sh in shapes), default=0), math.sqrt(sum((2 * sh[3] + gap) ** 2 for sh in shapes) * 1.6))
+    placed, x, y, row_h = [], 0.0, 0.0, 0.0
+    for kind, devs, rel, r in shapes:
+        if x and x + 2 * r > row_width:
+            x, y, row_h = 0.0, y + row_h + gap, 0.0
+        placed.append((kind, devs, rel, r, x + r, y + r))
+        x += 2 * r + gap
+        row_h = max(row_h, 2 * r)
+    if not placed:
+        return {}, []
+    min_x, max_x = min(c[4] - c[3] for c in placed), max(c[4] + c[3] for c in placed)
+    min_y, max_y = min(c[5] - c[3] for c in placed), max(c[5] + c[3] for c in placed)
+    ox, oy = (min_x + max_x) / 2, (min_y + max_y) / 2
+    pos, clusters = {}, []
+    for kind, devs, rel, r, cx, cy in placed:
+        clusters.append({"kind": kind, "count": len(devs), "x": cx - ox, "y": cy - oy, "r": r})
+        for d, (dx, dy) in zip(devs, rel):
+            pos[dkey(d)] = (cx - ox + dx, cy - oy + dy)
+    return pos, clusters

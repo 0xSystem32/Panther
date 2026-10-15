@@ -8,6 +8,7 @@ import ipaddress
 import socket
 import struct
 import random
+from .i18n import tr
 
 GET, GETNEXT, RESPONSE, GETBULK = 0xA0, 0xA1, 0xA2, 0xA5
 EOM = object()  # endOfMibView / noSuchObject / noSuchInstance
@@ -68,14 +69,14 @@ def parse_tlv(data, off):
         if n & 0x80:
             k = n & 0x7F
             if k == 0 or k > 4:
-                raise SnmpError("longueur BER invalide")
+                raise SnmpError(tr("longueur BER invalide"))
             n = int.from_bytes(data[off: off + k], "big")
             off += k
         if off + n > len(data):
-            raise SnmpError("paquet tronqué")
+            raise SnmpError(tr("paquet tronqué"))
         return tag, data[off: off + n], off + n
     except IndexError:
-        raise SnmpError("paquet tronqué") from None
+        raise SnmpError(tr("paquet tronqué")) from None
 
 
 def dec_oid(b):
@@ -120,7 +121,7 @@ def parse_message(data):
     """-> (pdu_type, req_id, error_status, [(oid, valeur)])."""
     tag, body, _ = parse_tlv(data, 0)
     if tag != 0x30:
-        raise SnmpError("message SNMP invalide")
+        raise SnmpError(tr("message SNMP invalide"))
     _, _, off = parse_tlv(body, 0)            # version
     _, _, off = parse_tlv(body, off)          # communauté
     ptag, pdu, _ = parse_tlv(body, off)
@@ -154,11 +155,11 @@ def _exchange(host, community, pdu_type, oids, port, timeout, retries=2, nonrep=
                     ptag, rid, err, vbs = parse_message(data)
                     if ptag == RESPONSE and rid == req_id:
                         if err:
-                            raise SnmpError(f"erreur SNMP {err}")
+                            raise SnmpError(tr("erreur SNMP {err}", err=err))
                         return vbs
             except socket.timeout:
                 continue
-        raise SnmpError("pas de réponse (communauté incorrecte, SNMP désactivé ou filtré)")
+        raise SnmpError(tr("pas de réponse (communauté incorrecte, SNMP désactivé ou filtré)"))
     finally:
         s.close()
 
@@ -222,7 +223,7 @@ def read_tables(host, community, port=161, timeout=2.0):
 
     def port_name(bp):
         idx = port_if.get(bp)
-        return names.get(idx) or f"port {bp}"
+        return names.get(idx) or tr("port {bp}", bp=bp)
     q_base = "1.3.6.1.2.1.17.7.1.2.2.1.2"
     rows = safe(q_base)
     if rows:

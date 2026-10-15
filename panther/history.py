@@ -11,14 +11,17 @@ import sqlite3
 import time
 
 from . import compare
+from . import privacy
+from . import security
 from . import store
+from .i18n import tr
 
 PATH = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"), "Panther", "panther.db")
 OFFLINE_DAYS = 14        # au-delà, un appareil absent n'est plus affiché
 OFFLINE_AFTER = 2        # nombre de scans manqués avant de le déclarer hors ligne (évite les faux « hors ligne »)
 KEEP_SCANS_DAYS = 90     # durée de conservation de la présence détaillée
 KEEP_EVENTS_DAYS = 365
-VERSION = 5
+VERSION = 6
 KEEP_SNAPSHOTS = True
 
 _BASE = """CREATE TABLE IF NOT EXISTS devices(
@@ -54,6 +57,9 @@ def _migrate(con):
             con.execute("ALTER TABLE scans ADD COLUMN snapshot_id INTEGER")
     if v < 5:  # fusion d'appareils : une ancienne MAC devient l'alias de l'appareil actuel
         con.execute("CREATE TABLE IF NOT EXISTS aliases(alias TEXT PRIMARY KEY, key TEXT NOT NULL)")
+    if v < 6:  # étiquettes, notes et groupe choisis par l'utilisateur
+        con.execute("CREATE TABLE IF NOT EXISTS device_meta(key TEXT PRIMARY KEY, note TEXT NOT NULL DEFAULT '', "
+                    "tags TEXT NOT NULL DEFAULT '', grp TEXT NOT NULL DEFAULT '')")
     con.execute(f"PRAGMA user_version={VERSION}")
 
 
@@ -63,6 +69,7 @@ def _connect():
     con.row_factory = sqlite3.Row
     con.execute(_BASE)
     _migrate(con)
+    privacy.harden(PATH)  # la base décrit votre réseau : lisible par vous seul
     return con
 
 
@@ -107,6 +114,7 @@ def _resolve(con, d, seen_keys):
 
 def _event(con, now, key, name, kind, detail=""):
     con.execute("INSERT INTO events(ts, key, name, kind, detail) VALUES(?,?,?,?,?)", (now, key, name, kind, detail))
+    return (kind, key, name, detail)
 
 
 def record_scan(devices, now=None, networks=None, depth="normal"):
@@ -120,7 +128,7 @@ def record_scan(devices, now=None, networks=None, depth="normal"):
         baseline = con.execute("SELECT COUNT(*) FROM devices").fetchone()[0] == 0
         scan_id = con.execute("INSERT INTO scans(ts, depth, networks) VALUES(?,?,?)",
                               (now, depth, ",".join(networks or []))).lastrowid
-        new, seen_keys, n_events, recs = [], set(), 0, []
+        new, seen_keys, n_events, recs, evs = [], set(), 0, [], []
         for d in devices:
             if not d.get("online", True):
                 continue
@@ -134,16 +142,16 @@ def record_scan(devices, now=None, networks=None, depth="normal"):
             if row is None:
                 con.execute("INSERT INTO devices(ip, mac, name, type, vendor, network, last_seen, key, first_seen, "
                             "online, misses) VALUES(?,?,?,?,?,?,?,?,?,1,0)", vals + (key, now))
-                _event(con, now, key, name or d["ip"], "first_seen", "première analyse" if baseline else d["ip"])
+                evs.append(_event(con, now, key, name or d["ip"], "first_seen", tr("première analyse") if baseline else d["ip"]))
                 n_events += 1
                 if not baseline:
                     new.append(key)
             else:
                 if row["ip"] != d["ip"]:
-                    _event(con, now, key, name or d["ip"], "ip_changed", f"{row['ip']} → {d['ip']}")
+                    evs.append(_event(con, now, key, name or d["ip"], "ip_changed", f"{row['ip']} → {d['ip']}"))
                     n_events += 1
                 if not row["online"]:
-                    _event(con, now, key, name or d["ip"], "online", "de retour sur le réseau")
+                    evs.append(_event(con, now, key, name or d["ip"], "online", tr("de retour sur le réseau")))
                     n_events += 1
                 con.execute("UPDATE devices SET ip=?, mac=COALESCE(NULLIF(?, ''), mac), name=?, type=?, vendor=?, network=?, "
                             "last_seen=?, online=1, misses=0 WHERE key=?", vals + (key,))
@@ -159,7 +167,7 @@ def record_scan(devices, now=None, networks=None, depth="normal"):
                 con.execute("UPDATE devices SET misses=?, online=? WHERE key=?",
                             (misses, 0 if went_off else r["online"], r["key"]))
                 if went_off:
-                    _event(con, now, r["key"], r["name"] or r["ip"], "offline", f"absent de {misses} scans")
+                    evs.append(_event(con, now, r["key"], r["name"] or r["ip"], "offline", tr("absent de {misses} scans", misses=misses)))
                     n_events += 1
         con.execute("UPDATE scans SET snapshot_id=? WHERE id=?", (_save_snapshot(con, recs), scan_id))
         con.execute("DELETE FROM seen WHERE scan_id IN (SELECT id FROM scans WHERE ts < ?)", (now - KEEP_SCANS_DAYS * 86400,))
@@ -167,7 +175,7 @@ def record_scan(devices, now=None, networks=None, depth="normal"):
         con.execute("DELETE FROM snapshots WHERE id NOT IN (SELECT snapshot_id FROM scans WHERE snapshot_id IS NOT NULL)")
         con.execute("DELETE FROM events WHERE ts < ?", (now - KEEP_EVENTS_DAYS * 86400,))
         con.commit()
-        return {"new": new, "baseline": baseline, "events": n_events}
+        return {"new": new, "baseline": baseline, "events": n_events, "event_list": evs}
     finally:
         con.close()
 
@@ -180,6 +188,65 @@ def _save_snapshot(con, recs):
     if row:
         return row["id"]
     return con.execute("INSERT INTO snapshots(hash, data) VALUES(?,?)", (digest, data)).lastrowid
+
+
+MAX_TAGS, MAX_TAG_LEN, MAX_NOTE, MAX_GROUP = 12, 30, 2000, 40
+
+
+def clean_tags(tags):
+    """Liste d'étiquettes propre : sans doublons (casse ignorée), sans virgules ni retours à la ligne, bornée."""
+    out, seen = [], set()
+    for t in (tags if isinstance(tags, (list, tuple)) else str(tags or "").split(",")):
+        t = " ".join(str(t).replace("\n", " ").replace(",", " ").split())[:MAX_TAG_LEN]
+        if t and t.lower() not in seen:
+            seen.add(t.lower())
+            out.append(t)
+    return out[:MAX_TAGS]
+
+
+def _meta_map(con):
+    return {r["key"]: {"note": r["note"], "tags": [t for t in r["tags"].split("\n") if t], "group": r["grp"]}
+            for r in con.execute("SELECT key, note, tags, grp FROM device_meta")}
+
+
+def _merge_meta(con, into, src):
+    m = _meta_map(con)
+    a, b = m.get(into), m.get(src)
+    if not b:
+        return
+    merged_tags = clean_tags((a or {}).get("tags", []) + b["tags"])
+    note = " | ".join(x for x in ((a or {}).get("note", ""), b["note"]) if x)[:MAX_NOTE]
+    group = (a or {}).get("group") or b["group"]
+    con.execute("INSERT OR REPLACE INTO device_meta(key, note, tags, grp) VALUES(?,?,?,?)", (into, note, "\n".join(merged_tags), group))
+    con.execute("DELETE FROM device_meta WHERE key=?", (src,))
+
+
+def set_meta(dev, note=None, tags=None, group=None):
+    """Enregistre étiquettes, note et groupe d'un appareil (champs omis : inchangés ; tout vide : entrée supprimée)."""
+    key = _key(dev)
+    con = _connect()
+    try:
+        cur = _meta_map(con).get(key, {"note": "", "tags": [], "group": ""})
+        note = cur["note"] if note is None else str(note).strip()[:MAX_NOTE]
+        tags = cur["tags"] if tags is None else clean_tags(tags)
+        group = cur["group"] if group is None else " ".join(str(group).split())[:MAX_GROUP]
+        if note or tags or group:
+            con.execute("INSERT OR REPLACE INTO device_meta(key, note, tags, grp) VALUES(?,?,?,?)", (key, note, "\n".join(tags), group))
+        else:
+            con.execute("DELETE FROM device_meta WHERE key=?", (key,))
+        con.commit()
+        dev["note"], dev["tags"], dev["group"] = note, tags, group
+    finally:
+        con.close()
+
+
+def meta_groups():
+    """Groupes déjà utilisés (pour les proposer à la saisie)."""
+    con = _connect()
+    try:
+        return sorted({m["group"] for m in _meta_map(con).values() if m["group"]}, key=str.lower)
+    finally:
+        con.close()
 
 
 def alias_map():
@@ -204,13 +271,13 @@ def merge_devices(into_key, from_key, now=None):
     manuels ; l'ancienne clé devient un alias (les futurs scans qui la voient sont rattachés à `into_key`)."""
     now = now or time.time()
     if into_key == from_key:
-        raise ValueError("Impossible de fusionner un appareil avec lui-même.")
+        raise ValueError(tr("Impossible de fusionner un appareil avec lui-même."))
     con = _connect()
     try:
         a = con.execute("SELECT * FROM devices WHERE key=?", (into_key,)).fetchone()
         b = con.execute("SELECT * FROM devices WHERE key=?", (from_key,)).fetchone()
         if a is None or b is None:
-            raise ValueError("Appareil inconnu dans l'historique.")
+            raise ValueError(tr("Appareil inconnu dans l'historique."))
         con.execute("UPDATE seen SET key=? WHERE key=?", (into_key, from_key))
         con.execute("UPDATE events SET key=? WHERE key=?", (into_key, from_key))
         con.execute("INSERT OR IGNORE INTO findings(key, rule, severity, title, first_seen, last_seen) "
@@ -221,10 +288,11 @@ def merge_devices(into_key, from_key, now=None):
         con.execute("UPDATE devices SET first_seen=?, last_seen=?, trusted=? WHERE key=?",
                     (min(a["first_seen"], b["first_seen"]), max(a["last_seen"], b["last_seen"]), max(a["trusted"], b["trusted"]), into_key))
         con.execute("DELETE FROM devices WHERE key=?", (from_key,))
+        _merge_meta(con, into_key, from_key)
         con.execute("UPDATE aliases SET key=? WHERE key=?", (into_key, from_key))
         con.execute("INSERT OR REPLACE INTO aliases(alias, key) VALUES(?, ?)", (from_key, into_key))
         store.move_override(from_key, into_key, keep_src=False)
-        _event(con, now, into_key, a["name"] or a["ip"], "merged", f"fusionné avec {b['name'] or b['ip']} ({from_key})")
+        _event(con, now, into_key, a["name"] or a["ip"], "merged", tr("fusionné avec {name} ({from_key})", name=b['name'] or b['ip'], from_key=from_key))
         con.commit()
     finally:
         con.close()
@@ -295,6 +363,23 @@ def purge(scans_days, events_days=None, now=None):
         con.close()
 
 
+def erase_all():
+    """Efface tout l'historique : appareils, scans, présence, journal, instantanés, positions, constats, alias, étiquettes et notes.
+    Les pages libérées sont écrasées (secure_delete) puis le fichier est compacté. -> nombre de lignes supprimées."""
+    con = _connect()
+    try:
+        con.execute("PRAGMA secure_delete=ON")
+        tables = [r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")]
+        removed = 0
+        for t in tables:
+            removed += con.execute(f'DELETE FROM "{t}"').rowcount  # noms issus de sqlite_master, jamais de l'utilisateur
+        con.commit()
+        con.execute("VACUUM")
+        return removed
+    finally:
+        con.close()
+
+
 def _stub(row):
     """Appareil absent du scan courant, reconstruit depuis la base (mêmes champs qu'un appareil scanné)."""
     return {"ip": row["ip"], "mac": row["mac"] or "", "vendor": row["vendor"] or "", "hostname": row["name"] or "",
@@ -315,8 +400,16 @@ def known_offline(online_keys, cidrs, now=None, days=OFFLINE_DAYS):
         marks = ",".join("?" * len(cidrs))
         rows = con.execute(f"SELECT * FROM devices WHERE network IN ({marks}) AND last_seen >= ? ORDER BY ip",
                            (*cidrs, now - days * 86400)).fetchall()
-        online_keys = set(online_keys)
-        return [_stub(r) for r in rows if r["key"] not in online_keys]
+        online_keys, meta = set(online_keys), _meta_map(con)
+        out = []
+        for r in rows:
+            if r["key"] in online_keys:
+                continue
+            d = _stub(r)
+            m = meta.get(r["key"], {})
+            d["note"], d["tags"], d["group"] = m.get("note", ""), list(m.get("tags", [])), m.get("group", "")
+            out.append(d)
+        return out
     finally:
         con.close()
 
@@ -327,8 +420,11 @@ def annotate(devices, now=None):
     con = _connect()
     try:
         rows = {r["key"]: r for r in con.execute("SELECT key, trusted, first_seen, last_seen FROM devices")}
+        meta = _meta_map(con)
         for d in devices:
             r = rows.get(_key(d))
+            m = meta.get(_key(d), {})
+            d["note"], d["tags"], d["group"] = m.get("note", ""), list(m.get("tags", [])), m.get("group", "")
             d["trusted"] = bool(r and r["trusted"])
             if r:
                 d["first_seen"] = r["first_seen"]
@@ -364,6 +460,7 @@ def forget(dev):
         con.execute("DELETE FROM positions WHERE key=?", (key,))
         con.execute("DELETE FROM findings WHERE key=?", (key,))
         con.execute("DELETE FROM aliases WHERE key=? OR alias=?", (key, key))
+        con.execute("DELETE FROM device_meta WHERE key=?", (key,))
         con.commit()
     finally:
         con.close()
@@ -393,7 +490,7 @@ def record_findings(devices, now=None):
                     con.execute("INSERT INTO findings(key, rule, severity, title, first_seen, last_seen) VALUES(?,?,?,?,?,?)",
                                 (key, rid, f["severity"], f["title"], now, now))
                     if not baseline:
-                        _event(con, now, key, name, "exposure", f"{f['title']} ({f['severity']})")
+                        _event(con, now, key, name, "exposure", f"{f['title']} ({security.LABELS[f['severity']].lower()})")
                         new.append((d, f))
             for rid, r in old.items():
                 if rid not in current:

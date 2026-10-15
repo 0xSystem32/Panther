@@ -26,6 +26,7 @@ from . import topology
 from . import fingerprint
 from . import models
 from . import store
+from .i18n import tr
 
 log = logging.getLogger("panther.scanner")
 DISCOVERY_PORTS = (80, 443, 22, 445, 53, 8080, 62078, 5353, 139, 9100)
@@ -51,6 +52,11 @@ PROFILES = {
 PROFILES["presence"] = dict(light=True, arp_rounds=1, arp_wait=1.2, arp_max=7.0, disc_ports=(80, 443, 22, 445, 62078), disc_timeout=0.3,
                             routed_timeout=0.5, second_pass=False, second_timeout=0, scan_ports=(), port_timeout=0.6, banners=False,
                             names_timeout=1.0, ssdp=0, mdns=0, lldp=0)
+# Écoute seule : aucune sonde envoyée (ni ARP forcé, ni TCP, ni SSDP/mDNS, ni noms, ni SNMP, ni traceroute). On lit seulement ce que le
+# noyau sait déjà (table des voisins), les baux DHCP locaux et le dernier scan complet.
+PROFILES["ecoute"] = dict(light=True, passive=True, arp_rounds=0, arp_wait=0, arp_max=0, disc_ports=(), disc_timeout=0, routed_timeout=0,
+                          second_pass=False, second_timeout=0, scan_ports=(), port_timeout=0, banners=False, names_timeout=0,
+                          ssdp=0, mdns=0, lldp=0)
 PORT_NAMES = {2323: "Telnet-alt", 2375: "Docker", 5984: "CouchDB", 8554: "RTSP-alt", 9200: "Elasticsearch",
               11211: "Memcached", 27017: "MongoDB", 25: "SMTP", 111: "RPC", 389: "LDAP", 873: "rsync", 1433: "MSSQL", 1883: "MQTT", 2049: "NFS",
               3000: "HTTP-dev", 5060: "SIP", 5900: "VNC", 7547: "TR-069", 8000: "HTTP-alt", 8081: "HTTP-alt",
@@ -68,7 +74,7 @@ def local_network(iface=None):
     if iface is None:
         m = re.search(r"default via (\S+) dev (\S+)", networks._run(["ip", "-4", "route", "show", "default"]))
         if not m:
-            raise RuntimeError("Aucune route par défaut : êtes-vous connecté à un réseau ?")
+            raise RuntimeError(tr("Aucune route par défaut : êtes-vous connecté à un réseau ?"))
         gw, dev = m.groups()
     else:
         dev = iface
@@ -76,7 +82,7 @@ def local_network(iface=None):
         gw = m.group(1) if m else ""  # une interface secondaire n'a pas forcément de passerelle
     m = re.search(r"inet (\S+)", networks._run(["ip", "-4", "-o", "addr", "show", "dev", dev]))
     if not m:
-        raise RuntimeError(f"L'interface {dev} n'a pas d'adresse IPv4 : choisissez-en une autre.")
+        raise RuntimeError(tr("L'interface {dev} n'a pas d'adresse IPv4 : choisissez-en une autre.", dev=dev))
     itf = ipaddress.ip_interface(m.group(1))
     net = itf.network
     if net.prefixlen < 24:  # on borne à un /24 pour garder un scan rapide
@@ -387,7 +393,7 @@ class Scanner:
             self.state["status"] = "scanning"
             self.state["started"] = time.time()
             self.state["depth"] = depth if depth in PROFILES else "normal"
-            self.state["security"] = self.security = bool(security)
+            self.state["security"] = self.security = bool(security) and self.state["depth"] != "ecoute"  # l'écoute seule n'envoie rien
             self.iface = iface or None
             self.known = dict(known or {})
             self.aliases = dict(aliases or {})
@@ -415,18 +421,18 @@ class Scanner:
             net["vlan"] = networks.vlan_ids().get(net["iface"])
             local = ipaddress.ip_network(net["cidr"])
             extra_nets, early_warnings = [], []
-            for t in targets:
+            for t in ([] if self.profile.get("passive") else targets):  # écoute seule : pas de plages routées (il faudrait les sonder)
                 try:
                     n = networks.validate_cidr(t)  # refuse les plages publiques ou trop grandes
                 except ValueError as e:
-                    early_warnings.append(f"Plage ignorée : {e}")
+                    early_warnings.append(tr("Plage ignorée : {e}", e=e))
                     continue
                 if not n.overlaps(local) and all(not n.overlaps(e) for e in extra_nets):
                     extra_nets.append(n)
             all_nets = [local] + extra_nets
             hosts = [str(h) for n in all_nets for h in (n.hosts() if n.num_addresses > 2 else n)]
             if len(hosts) > 2 * networks.MAX_HOSTS:
-                raise RuntimeError(f"Trop d'adresses à scanner ({len(hosts)}) : réduisez les plages.")
+                raise RuntimeError(tr("Trop d'adresses à scanner ({hosts_count}) : réduisez les plages.", hosts_count=len(hosts)))
             self._set(network=net, networks=[
                 {"cidr": str(local), "kind": "local", "vlan": net["vlan"]}]
                 + [{"cidr": str(n), "kind": "routé", "vlan": None} for n in extra_nets])
@@ -464,7 +470,11 @@ class Scanner:
                         if ok:
                             found.add(ip)
 
-            alive, maybes, arp_ok = arp_discover(net["iface"], local_hosts, P, self.cancel, lambda p: self._set(progress=p))
+            if P.get("passive"):
+                alive, maybes, arp_ok = {}, [], True  # on ne provoque rien : seule la table du noyau compte (lue plus bas)
+                self._set(progress=55)
+            else:
+                alive, maybes, arp_ok = arp_discover(net["iface"], local_hosts, P, self.cancel, lambda p: self._set(progress=p))
             if arp_ok:
                 arp.update(alive)
                 found |= set(alive)
@@ -485,11 +495,11 @@ class Scanner:
                     found.add(ip)
             found.add(net["ip"])
             self._set(progress=62)
-            snmp_arp, fdb, warnings, snmp_info = self._read_snmp(snmp_sources, all_nets, found)
+            snmp_arp, fdb, warnings, snmp_info = ({}, {}, [], []) if P.get("passive") else self._read_snmp(snmp_sources, all_nets, found)
             warnings = early_warnings + warnings
             # en mode présence, SSDP/mDNS ne servent que s'il y a un appareil inconnu à identifier
             unknown_local = [ip for ip in found if ip != net["ip"] and self.aliases.get(arp.get(ip, ""), arp.get(ip, "")) not in self.known and ipaddress.ip_address(ip) in local]
-            if self.cancel.is_set() or (P["light"] and not unknown_local):
+            if self.cancel.is_set() or P.get("passive") or (P["light"] and not unknown_local):
                 ssdp, mdns, wsd = {}, {}, {}
             else:
                 full = PROFILES["normal"] if P["light"] else P
@@ -503,11 +513,11 @@ class Scanner:
                     pass
             extra = {"ssdp": ssdp, "mdns": mdns, "wsd": wsd, "snmp_arp": snmp_arp, "leases": dhcp.read_leases()}
             ips = sorted(found, key=lambda i: ipaddress.ip_address(i))
-            paths = self._trace_paths(extra_nets, found)
+            paths = {} if P.get("passive") else self._trace_paths(extra_nets, found)
             for n_ in extra_nets:
                 if not any(ipaddress.ip_address(i) in n_ for i in found):
-                    hint = f" Dernier saut atteint : {[h for h in paths.get(str(n_), []) if h][-1]}." if any(paths.get(str(n_), [])) else ""
-                    warnings.append(f"Réseau {n_} : aucun hôte n'a répondu (routage entre VLAN ou pare-feu ?).{hint}")
+                    hint = tr(" Dernier saut atteint : {hop}.", hop=[h for h in paths.get(str(n_), []) if h][-1]) if any(paths.get(str(n_), [])) else ""
+                    warnings.append(tr("Réseau {n} : aucun hôte n'a répondu (routage entre VLAN ou pare-feu ?).{hint}", n=n_, hint=hint))
             n = [0]
 
             def enrich(ip):
@@ -517,7 +527,7 @@ class Scanner:
                     dev = self._inspect(ip, net, arp, extra)
                 except Exception as e:  # noqa: BLE001 - un appareil récalcitrant ne doit pas faire échouer tout le scan
                     log.warning("Analyse de %s impossible", ip, exc_info=True)
-                    warnings.append(f"Analyse de {ip} impossible : {e}")
+                    warnings.append(tr("Analyse de {ip} impossible : {e}", ip=ip, e=e))
                     n[0] += 1
                     return
                 dev["network"] = net_of(ip)
@@ -553,11 +563,11 @@ class Scanner:
             host, comm = src.get("host", ""), src.get("community", "public")
             try:
                 if not ipaddress.ip_address(host).is_private:
-                    raise ValueError("adresse non privée")
+                    raise ValueError(tr("adresse non privée"))
                 t = snmp.read_tables(host, comm, port=src.get("port", 161))
             except (snmp.SnmpError, ValueError, OSError) as e:
                 log.warning("SNMP %s : %s", host, e)
-                warnings.append(f"SNMP {host} : {e}")
+                warnings.append(tr("SNMP {host} : {e}", host=host, e=e))
                 continue
             info.append({"host": host, "name": t["name"], "arp": len(t["arp"]), "fdb": len(t["fdb"])})
             for ip, mac in t["arp"].items():
@@ -582,7 +592,7 @@ class Scanner:
         """Chemin (routeurs traversés) vers chaque réseau supplémentaire."""
         def trace(n):
             alive = sorted((i for i in found if ipaddress.ip_address(i) in n), key=ipaddress.ip_address)
-            target = alive[0] if alive else str(next(n.hosts(), n.network_address))
+            target = alive[0] if alive else str(next(iter(n.hosts()), n.network_address))
             return str(n), topology.traceroute(target) or []
         if not extra_nets:
             return {}
@@ -596,7 +606,7 @@ class Scanner:
                "services": [PORT_NAMES.get(p, str(p)) for p in ports], "banners": {}, "ttl": None,
                "is_gateway": ip == net["gateway"], "is_self": False, "random_mac": fingerprint.is_random_mac(mac), "online": True,
                "mdns_services": [], "mdns_names": [], "mdns_txt": {}, "ssdp": {}, "model": "", "os": rec.get("os", ""),
-               "type": rec.get("type") or "unknown", "confidence": 70, "reasons": ["connu : détails du dernier scan complet"],
+               "type": rec.get("type") or "unknown", "confidence": 70, "reasons": [tr("connu : détails du dernier scan complet")],
                "light": True, "security": None}
         if dev["is_gateway"]:
             dev["type"] = "router"
@@ -616,12 +626,14 @@ class Scanner:
             rec = None if me else (self.known.get(self.aliases.get(mac, mac)) or self.known.get("ip:" + ip))
             if rec:
                 return self._known_device(ip, net, mac, rec)
-            P = PROFILES["normal"]  # appareil inconnu : analyse complète, comme un scan normal
+            if not P.get("passive"):
+                P = PROFILES["normal"]  # appareil inconnu : analyse complète, comme un scan normal
+        active = not me and not P.get("passive")  # écoute seule : rien n'est envoyé à l'appareil
         bg = ThreadPoolExecutor(2)  # noms et TTL se résolvent pendant le scan des ports, pas après
-        f_names = None if me else bg.submit(resolve_names, ip, P["names_timeout"])
-        f_ttl = None if me else bg.submit(ping_ttl, ip)
+        f_names = bg.submit(resolve_names, ip, P["names_timeout"]) if active else None
+        f_ttl = bg.submit(ping_ttl, ip) if active else None
         scan = tuple(P["scan_ports"]) + (tuple(p for p in security.EXTRA_PORTS if p not in P["scan_ports"]) if self.security else ())
-        ports = scan_ports(ip, scan, P["port_timeout"]) if not me else []
+        ports = scan_ports(ip, scan, P["port_timeout"]) if active else []
         banners = {}
         wanted = [p for p in ports if P["banners"] and (p == 22 or p in HTTP_PORTS or p in TLS_PORTS or (self.security and p == 21))]
         if wanted:
@@ -638,14 +650,14 @@ class Scanner:
         ss = extra["ssdp"].get(ip, {})
         wd = extra.get("wsd", {}).get(ip, {})
         names = sorted(md.get("names", []))
-        dns, nb_name, mdns_n = ("", "", "") if me else f_names.result()
+        dns, nb_name, mdns_n = f_names.result() if active else ("", "", "")
         hostname = (dns or nb_name or md.get("host") or mdns_n or (names[0] if names else "") or ss.get("friendly", "")
                     or extra.get("leases", {}).get(mac, ""))
         with _nb_lock:
             netbios = _nb_info.pop(ip, {})
         if me:
             hostname = socket.gethostname()
-        ttl = 64 if me else f_ttl.result()
+        ttl = 64 if me else (f_ttl.result() if active else None)
         bg.shutdown(wait=False)
         vendor = fingerprint.vendor_of(mac) or ss.get("manufacturer", "") or wd.get("name", "") or cert_vendor
         dev = {"ip": ip, "mac": mac, "vendor": vendor, "hostname": hostname,
@@ -655,13 +667,15 @@ class Scanner:
                "random_mac": fingerprint.is_random_mac(mac), "online": True,
                "mdns_services": sorted(md.get("services", [])), "mdns_names": names,
                "mdns_txt": md.get("txt", {}), "ssdp": ss, "wsd": wd, "netbios": netbios, "cert": cert_info}
+        if not me and not active:
+            dev["light"] = True  # détails non sondés : l'interface ne les présente pas comme vérifiés
         dev["http_info"] = " ".join(v for k, v in banners.items() if k in HTTP_PORTS or k in TLS_PORTS)[:300]
         model_text = fingerprint._model_text(dev)
         dev["model"] = (md.get("txt", {}).get("model") or md.get("txt", {}).get("md") or md.get("txt", {}).get("rpmd")
                         or md.get("txt", {}).get("ty") or ss.get("model", "") or wd.get("hardware", ""))
         friendly = models.friendly(dev["model"])
         dev["model_name"] = friendly["name"] if friendly else ""
-        dev["os"] = "Linux (cette machine)" if me else fingerprint.guess_os(
+        dev["os"] = tr("Linux (cette machine)") if me else fingerprint.guess_os(
             ttl, ports, vendor, hostname, banners, model_text)
         if me:
             dev["self_kind"] = "laptop" if glob.glob("/sys/class/power_supply/BAT*") else "desktop"
@@ -670,6 +684,6 @@ class Scanner:
             dev["vendor"] = fingerprint.vendor_hint(mac)
         store.apply(dev, self.overrides, self.aliases)
         # analyse d'exposition (opt-in, lecture seule) : après le typage définitif de l'appareil
-        dev["security"] = None if (me or not self.security) else security.analyze(dev, security.active_probes(ip, ports))
+        dev["security"] = None if (me or not self.security or not active) else security.analyze(dev, security.active_probes(ip, ports))
         dev["mdns_txt"] = {k: v[:80] for k, v in list(dev["mdns_txt"].items())[:12]}
         return dev

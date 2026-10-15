@@ -37,31 +37,32 @@ effort **S** (< 1 h) · **M** (quelques heures) · **L** (plus d'une journée).
 - [ ] **P3 · L** Support IPv6 (découverte NDP, adresses multiples par appareil)
 
 ## 3. Fonctions
-- [ ] **P2 · M** Étiquettes, notes et groupes par appareil (« enfants », « domotique »), filtres associés
-- [ ] **P2 · M** Alertes par e-mail ou webhook (nouvel appareil, nouvelle exposition), en plus de la notification de bureau
-- [ ] **P2 · M** Rapport PDF/Markdown planifié (hebdomadaire) dans un dossier choisi
-- [ ] **P2 · S** Export de la carte en PNG/SVG ; export enrichi (confiance, historique)
-- [ ] **P3 · M** Réveil à distance (Wake-on-LAN) d'un appareil hors ligne
+- [x] Étiquettes, notes et groupes par appareil (« enfants », « domotique »), filtres associés
+- [x] Alertes par webhook (Discord, Slack, ntfy, JSON) ou e-mail SMTP, un message groupé par scan, secrets dans le trousseau
+- [x] Rapport PDF planifié (quotidien ou hebdomadaire) dans un dossier choisi, nettoyage des plus anciens (seuls ses propres fichiers)
+- [x] Export de la carte en PNG/SVG ; export enrichi (confiance, historique)
+- [x] Réveil à distance (Wake-on-LAN) d'un appareil hors ligne
 - [ ] **P3 · M** Latence et disponibilité par appareil (courbe dans le panneau)
 - [ ] **P3 · M** Profils de scan enregistrés (plages, profondeur, interface, SNMP)
-- [ ] **P3 · M** Mise à jour de la base IEEE depuis un menu (avec confirmation)
-- [ ] **P3 · M** SNMP v3 (authentification et chiffrement) en plus de v2c
+- [x] Mise à jour de la base IEEE depuis un menu (avec confirmation)
+- [ ] **P3 · M** SNMP v3 (authentification et chiffrement) en plus de v2c — la bibliothèque standard n'a pas AES : au mieux authNoPriv sans dépendance
 - [ ] **P3 · L** Plusieurs sites / plusieurs machines d'écoute
 
 ## 4. Vie privée et sécurité du logiciel
-- [ ] **P1 · S** Menu « Effacer l'historique » (la base contient les MAC et noms des appareils de la maison)
-- [ ] **P1 · M** Communauté SNMP dans le trousseau du système (libsecret) au lieu de la configuration en clair
-- [ ] **P2 · S** Fichier de sécurité `SECURITY.md` (comment signaler une faille) et revue des entrées non fiables (bannières, noms)
-- [ ] **P3 · M** Chiffrer ou protéger la base locale (option)
-- [ ] **P3 · S** Option de désactivation complète des sondes actives (mode « écoute seule »)
+- [x] « Tout effacer » (Fichier > Historique et données) : base (pages écrasées), noms choisis, étiquettes, journal ; confirmation
+- [x] Communauté SNMP dans le trousseau du système (ou fichier 600), migration automatique de l'ancienne configuration
+- [x] `SECURITY.md` ; revue des entrées non fiables : infobulles Qt échappées (faille trouvée et corrigée), interface web (CSP, échappement), tests avec texte hostile
+- [x] Base protégée : dossier 700, base et journal 600 (pas de chiffrement : la bibliothèque standard n'en offre pas ; chiffrer le disque)
+- [ ] **P3 · L** Chiffrement réel de la base (SQLCipher ou `cryptography` en dépendance optionnelle)
+- [x] Mode « écoute seule » (menu Sécurité, `--depth ecoute`) : aucune sonde, test qui vérifie qu'aucune fonction réseau n'est appelée
 
 ## 5. Interface
-- [ ] **P1 · M** Interface et README en anglais (sélecteur FR/EN) : beaucoup de recruteurs lisent l'anglais
-- [ ] **P2 · M** Mode `--demo` : réseau fictif intégré pour essayer l'application sans scanner (utile aussi pour les démonstrations)
-- [ ] **P2 · M** Carte : regroupement par type, mini-carte, sélection multiple, recentrage sur l'appareil choisi
-- [ ] **P2 · S** Accessibilité : navigation au clavier complète, contrastes, tailles de police réglables
-- [ ] **P3 · S** Thème qui suit celui du système
-- [ ] **P3 · M** Assistant de premier lancement (interface, profondeur, analyse de sécurité)
+- [x] Interface, README, règles et sécurité en anglais (menu Affichage → Langue, `--lang`, langue du système par défaut) : module `i18n.py` maison (français = texte source, catalogue `lang_en.py` de ~790 textes), `tools/i18n_check.py` + tests (textes manquants/périmés, champs identiques, aucun français dans l'interface anglaise), interface web traduite (`/api/strings`), captures anglaises (`docs/img/en/`). Limite : les textes déjà enregistrés (journal, constats) gardent leur langue d'origine
+- [x] Mode `--demo` : réseau fictif (16 appareils, 2 réseaux, historique semé), faux moteur qui simule la progression ; configuration temporaire supprimée à la fermeture, réveil à distance et téléchargements désactivés ; sert aussi aux captures du README
+- [x] Carte : disposition « regroupée par type » (amas ronds, positions mémorisées à part), mini-carte (visible quand on zoome, clic/glisser), sélection multiple (Maj + glisser, Ctrl + clic, tout sélectionner) avec panneau de synthèse, confiance et étiquettes/groupe en masse, centrage sur la sélection (`Ctrl+Maj+0`)
+- [x] Accessibilité : carte aux flèches (Entrée, Échap, +/−, Ctrl+A), focus visible, contrastes WCAG AA vérifiés par test pour les 3 thèmes (AAA pour « contraste élevé »), taille du texte réglable (4 tailles, carte comprise), noms accessibles. Limite : les nœuds de la carte ne sont pas exposés aux lecteurs d'écran (l'onglet Appareils, un tableau, est l'équivalent)
+- [x] Thème automatique (suit le système en direct, Qt ≥ 6.5), sombre, clair, contraste élevé
+- [x] Assistant de premier lancement (langue, usage responsable obligatoire, apparence, profondeur, écoute seule, analyse de sécurité, scan automatique) ; Aide → Assistant pour le rouvrir
 
 ## 6. Qualité du code
 - [ ] **P1 · L** Découper `gui.py` (≈ 1 800 lignes) en modules : carte, dialogues, fenêtre principale

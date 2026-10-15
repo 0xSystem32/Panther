@@ -10,9 +10,9 @@ HAS_QT = importlib.util.find_spec("PyQt6") is not None
 
 if HAS_QT:
     from PyQt6.QtCore import QSettings, Qt
-    from PyQt6.QtWidgets import QApplication
+    from PyQt6.QtWidgets import QApplication, QTableWidget, QWidget
 
-    from panther import compare, gui, history, reportpdf, rules, security, store
+    from panther import alerts, compare, gui, history, ouiupdate, reportpdf, rules, schedule, secrets, security, store, wol
 
 NET = "192.168.1.0/24"
 
@@ -44,6 +44,9 @@ class GuiTests(unittest.TestCase):
         store.PATH = os.path.join(self.tmp.name, "devices.json")
         QSettings.setPath(QSettings.Format.NativeFormat, QSettings.Scope.UserScope, self.tmp.name)
         rules.PATH = os.path.join(self.tmp.name, "rules.json")                   # jamais les vraies règles de l'utilisateur
+        alerts.PATH = os.path.join(self.tmp.name, "alerts.json")                 # ni les vrais réglages d'alertes ni les vrais secrets
+        secrets.PATH = os.path.join(self.tmp.name, "secrets.json")
+        self._secret_tool, secrets._tool = secrets._tool, (lambda: None)
         rules._cache.update(path=None, mtime=None, rs=rules.RuleSet())
         gui.T.update(gui.THEMES["dark"]); self.app.setStyleSheet(gui.make_style())
         self.boxes = []                                                          # boîtes de dialogue neutralisées (elles bloqueraient hors écran)
@@ -57,6 +60,9 @@ class GuiTests(unittest.TestCase):
         self.w.show()
 
     def tearDown(self):
+        secrets._tool = self._secret_tool
+        gui.set_text_scale(1.0)
+        gui.T.update(gui.THEMES["dark"])
         self.w.close()
         self.tmp.cleanup()
 
@@ -385,6 +391,947 @@ class GuiTests(unittest.TestCase):
         self.assertEqual(gui.human_size(512), "512 o")
         self.assertEqual(gui.human_size(2048), "2.0 Ko")
         self.assertEqual(gui.human_size(5 * 1024 * 1024), "5.0 Mo")
+
+    # --- alertes
+    def wait_workers(self, w, timeout=5):
+        end = time.time() + timeout
+        while any(x.isRunning() for x in getattr(w, "_alert_workers", [])) and time.time() < end:
+            self.app.processEvents(); time.sleep(0.02)
+        self.app.processEvents()
+
+    def capture_dispatch(self, results=None):
+        calls = []
+        orig = alerts.dispatch
+        alerts.dispatch = lambda cfg, events, when=None, **kw: calls.append((events, kw)) or (results if results is not None else [("webhook", True, "")])
+        self.addCleanup(setattr, alerts, "dispatch", orig)
+        return calls
+
+    def enable_alerts(self, **events):
+        alerts.save({"enabled": True, "events": events, "webhook": {"enabled": True, "format": "generic"}})
+
+    def test_alerts_dialog_saves_settings_and_secrets_in_different_places(self):
+        dlg = gui.AlertsDialog(self.w)
+        dlg.enabled.setChecked(True); dlg.wh_on.setChecked(True); dlg.wh_fmt.setCurrentIndex(dlg.wh_fmt.findData("discord"))
+        dlg.wh_url.setText("https://discord.example/api/webhooks/SECRET-TOKEN")
+        dlg.em_on.setChecked(True); dlg.em_host.setText("smtp.test"); dlg.em_user.setText("moi"); dlg.em_pw.setText("MOT-DE-PASSE")
+        dlg.em_from.setText("a@b.fr"); dlg.em_to.setText("c@d.fr, e@f.fr"); dlg.sev.setCurrentIndex(dlg.sev.findData("critique")); dlg.auto_only.setChecked(False)
+        dlg.accept()
+        cfg = alerts.load()
+        self.assertEqual((cfg["enabled"], cfg["webhook"]["format"], cfg["email"]["to"], cfg["events"]["exposure_min"], cfg["events"]["auto_only"]),
+                         (True, "discord", ["c@d.fr", "e@f.fr"], "critique", False))
+        with open(alerts.PATH, encoding="utf-8") as f:
+            raw = f.read()
+        self.assertNotIn("SECRET-TOKEN", raw); self.assertNotIn("MOT-DE-PASSE", raw)           # jamais dans le fichier de réglages
+        self.assertEqual((secrets.get(alerts.SECRET_WEBHOOK), secrets.get(alerts.SECRET_SMTP)), ("https://discord.example/api/webhooks/SECRET-TOKEN", "MOT-DE-PASSE"))
+        again = gui.AlertsDialog(self.w)                                                      # rouvert : secrets non réaffichés, mais conservés
+        self.assertEqual((again.wh_url.text(), again.em_pw.text()), ("", ""))
+        self.assertIn("déjà enregistrée", again.wh_url.placeholderText())
+        again.accept()
+        self.assertEqual(secrets.get(alerts.SECRET_SMTP), "MOT-DE-PASSE")                      # laisser vide = garder
+
+    # --- vie privée
+    def test_legacy_plaintext_snmp_community_is_migrated_to_the_secret_store(self):
+        self.w.settings.setValue("snmp", '[{"host": "192.168.1.1", "community": "COMMU-SECRETE"}]')
+        sources = self.w.load_snmp()
+        self.assertEqual(sources, [{"host": "192.168.1.1", "community": "COMMU-SECRETE"}])
+        self.assertEqual(secrets.get(gui.snmp_secret("192.168.1.1")), "COMMU-SECRETE")
+        self.assertNotIn("COMMU-SECRETE", self.w.settings.value("snmp"))                # plus en clair dans les réglages
+        self.assertEqual(self.w.load_snmp(), sources)                                   # relu : toujours là, sans nouvelle migration
+
+    def test_saving_snmp_sources_keeps_communities_out_of_settings_and_forgets_removed_hosts(self):
+        a, b = {"host": "10.0.0.1", "community": "AAA"}, {"host": "10.0.0.2", "community": "BBB"}
+        self.w.save_snmp([a, b], [])
+        raw = self.w.settings.value("snmp")
+        self.assertNotIn("AAA", raw); self.assertNotIn("BBB", raw)
+        self.assertEqual(self.w.load_snmp(), [a, b])
+        self.w.save_snmp([b], [a, b])
+        self.assertIsNone(secrets.get(gui.snmp_secret("10.0.0.1")))
+        self.assertEqual(secrets.get(gui.snmp_secret("10.0.0.2")), "BBB")
+
+    def test_broken_snmp_settings_do_not_crash(self):
+        for bad in ("pas du json", "[1, 2]", '[{"pas_de_host": 1}]', '{"a": 1}'):
+            self.w.settings.setValue("snmp", bad)
+            self.assertEqual(self.w.load_snmp(), [])
+
+    def test_erase_everything_empties_history_names_and_log_after_confirmation(self):
+        self.scan([dev("192.168.1.1", "box", "router"), dev("192.168.1.20", "tv", "tv")])
+        store.set_override(self.w.devices[0], name="Mon nom")
+        logfile = os.path.join(self.tmp.name, "panther.log")
+        with open(logfile, "w") as f:
+            f.write("192.168.1.20 tv\n")
+        old, gui.log_path = gui.log_path, (lambda: logfile)
+        try:
+            dlg = gui.DataDialog(90, 365, self.w)
+            dlg.erase_everything()
+        finally:
+            gui.log_path = old
+        self.assertTrue(dlg.erased)
+        self.assertEqual(history.db_stats()["devices"], 0)
+        self.assertEqual((store.load(), os.path.getsize(logfile)), ({}, 0))
+        self.assertTrue(any(b[0] == "question" for b in self.boxes))
+        self.w.after_erase()
+        self.assertEqual(self.w.devices, [])
+
+    def test_erase_everything_does_nothing_when_declined(self):
+        self.scan([dev("192.168.1.1", "box", "router")])
+        gui.QMessageBox.question = staticmethod(lambda *a, **k: gui.QMessageBox.StandardButton.No)
+        dlg = gui.DataDialog(90, 365, self.w)
+        dlg.erase_everything()
+        self.assertFalse(dlg.erased)
+        self.assertGreater(history.db_stats()["devices"], 0)
+
+    def test_erase_can_keep_names_and_log(self):
+        self.scan([dev("192.168.1.1", "box", "router")])
+        store.set_override(self.w.devices[0], name="Garde-moi")
+        dlg = gui.DataDialog(90, 365, self.w)
+        dlg.erase_names.setChecked(False); dlg.erase_log.setChecked(False)
+        dlg.erase_everything()
+        self.assertEqual(history.db_stats()["devices"], 0)
+        self.assertEqual(len(store.load()), 1)
+
+    def test_passive_mode_forces_the_listening_profile_and_no_security(self):
+        self.w.act_passive.trigger()
+        self.assertTrue(self.w.passive_on)
+        self.assertFalse(self.w.depth.isEnabled())
+        depth, known = self.w.choose_depth(auto=True)
+        self.assertEqual((depth, known), ("ecoute", {}))
+        calls = []
+        self.w.scanner.start = lambda *a, **k: calls.append(a) or True
+        self.w.security_on = True
+        self.w.start_scan()
+        self.assertEqual((calls[0][2], calls[0][3]), ("ecoute", False))                  # aucune analyse de sécurité en écoute seule
+        self.w.act_passive.trigger()
+        self.assertTrue(self.w.depth.isEnabled())
+        self.assertNotEqual(self.w.choose_depth()[0], "ecoute")
+
+    def test_hostile_network_text_is_never_rendered_as_html(self):
+        """Noms, bannières et certificats viennent du réseau : ils s'affichent comme du texte, jamais comme du HTML."""
+        from PyQt6.QtWidgets import QLabel
+        evil = "<img src=x onerror=alert(1)><b>GRAS</b><a href='http://evil.example'>clic</a>"
+        d = dev("192.168.1.30", evil, "camera", ports=(80, 554))
+        d.update(vendor=evil, model=evil, model_name=evil, os=evil, mdns_names=[evil], mdns_services=[evil], reasons=[evil],
+                 banners={"80": evil}, http_info=evil, cert={"cn": evil, "o": evil, "issuer": evil}, ssdp={"friendly": evil, "model": evil},
+                 netbios={"workgroup": evil}, security=[{"id": "x", "severity": "élevé", "title": evil, "detail": evil, "remedy": evil, "port": 80}])
+        self.scan([d])
+        self.w.selected = gui.dkey(self.w.devices[0]); self.w.refresh_panel(); self.app.processEvents()
+        bad = []
+        for lab in self.w.findChildren(QLabel):
+            t = lab.text()
+            if "onerror" in t and lab.textFormat() != Qt.TextFormat.PlainText and Qt.mightBeRichText(t):
+                bad.append(("label", t[:50]))
+            if "<img" in lab.toolTip().replace("&lt;img", ""):
+                bad.append(("tooltip", lab.toolTip()[:50]))
+        for w in self.w.findChildren(QWidget):                                           # toutes les infobulles, pas seulement celles des étiquettes
+            if "<img" in w.toolTip().replace("&lt;img", ""):
+                bad.append(("tooltip", type(w).__name__))
+        for table in self.w.findChildren(QTableWidget):
+            for r in range(table.rowCount()):
+                for c in range(table.columnCount()):
+                    it = table.item(r, c)
+                    if it and "<img" in it.toolTip().replace("&lt;img", ""):
+                        bad.append(("item", r, c))
+        for n in self.w.nodes.values():
+            if "<img" in n.toolTip().replace("&lt;img", ""):
+                bad.append(("node", n.toolTip()[:40]))
+        self.assertEqual(bad, [])
+
+    # --- carte : disposition par type, mini-carte, sélection multiple
+    def map_devices(self, n=14):
+        ds = [dev("192.168.1.13", "debian", "desktop", is_self=True), dev("192.168.1.1", "box", "router", [80], is_gateway=True)]
+        kinds = ["phone", "tv", "camera", "printer", "nas", "iot"]
+        for i in range(n):
+            ds.append(dev(f"192.168.1.{20 + i}", f"app{i}", kinds[i % len(kinds)]))
+        return ds
+
+    def test_type_layout_builds_one_zone_per_type_and_remembers_positions_separately(self):
+        from panther.gui import Zone
+        self.scan(self.map_devices())
+        star_pos = {k: (n.pos().x(), n.pos().y()) for k, n in self.w.nodes.items()}
+        self.w.set_layout("types")
+        zones = [i for i in self.w.scene.items() if isinstance(i, Zone)]
+        self.assertEqual(len(zones), len({d["type"] for d in self.w.devices}))
+        self.assertEqual(len(self.w.nodes), len(self.w.devices))
+        self.assertFalse(any(type(i).__name__ == "Link" for i in self.w.scene.items()))      # pas de liens : seulement des amas
+        self.assertNotEqual({k: (n.pos().x(), n.pos().y()) for k, n in self.w.nodes.items()}, star_pos)
+        k = next(iter(self.w.nodes)); node = self.w.nodes[k]
+        node.setPos(node.pos().x() + 40, node.pos().y()); self.w.remember_position(node)
+        moved_x = node.pos().x()
+        self.w.set_layout("etoile")
+        self.assertEqual((self.w.nodes[k].pos().x(), self.w.nodes[k].pos().y()), star_pos[k])  # la disposition étoile n'a pas bougé
+        self.w.set_layout("types")
+        self.assertAlmostEqual(self.w.nodes[k].pos().x(), moved_x, places=3)             # celle-ci a gardé le déplacement
+        self.assertEqual(self.w.settings.value("layout"), "types")
+
+    def test_layout_menu_offers_the_three_layouts(self):
+        self.assertEqual(set(self.w.layout_actions), {"etoile", "hierarchique", "types"})
+
+    def test_minimap_only_shows_when_the_whole_map_is_not_visible(self):
+        self.scan(self.map_devices(30))
+        self.w.view.resetTransform(); self.w.view.fitInView(self.w.scene.itemsBoundingRect(), Qt.AspectRatioMode.KeepAspectRatio)
+        self.app.processEvents()
+        self.assertFalse(self.w.view.minimap_visible())
+        self.w.view.scale(3, 3); self.app.processEvents()
+        self.assertTrue(self.w.view.minimap_visible())
+        self.w.view.show_minimap = False
+        self.assertFalse(self.w.view.minimap_visible())
+
+    def test_minimap_click_moves_the_view_and_paints_without_error(self):
+        from PyQt6.QtCore import QPointF
+        from PyQt6.QtGui import QImage, QPainter
+        self.scan(self.map_devices(30))
+        v = self.w.view
+        v.resetTransform(); v.scale(2.5, 2.5); self.app.processEvents()
+        scene_rect, k, ox, oy = v.minimap_scale()
+        target = QPointF(scene_rect.left() + 0.2 * scene_rect.width(), scene_rect.top() + 0.2 * scene_rect.height())
+        v._mm_move(QPointF(ox + (target.x() - scene_rect.left()) * k, oy + (target.y() - scene_rect.top()) * k))
+        centre = v.mapToScene(v.viewport().rect().center())
+        self.assertLess(abs(centre.x() - target.x()), 60); self.assertLess(abs(centre.y() - target.y()), 60)
+        img = QImage(v.viewport().size(), QImage.Format.Format_ARGB32); img.fill(0)
+        p = QPainter(img); v.paint_minimap(p); p.end()
+        box = v.minimap_rect()
+        self.assertNotEqual(img.pixel(int(box.center().x()), int(box.center().y())), 0)             # quelque chose a été dessiné
+        self.assertEqual(img.pixel(3, 3), 0)                                                         # et seulement dans le cadre
+
+    def test_minimap_geometry_with_an_empty_scene(self):
+        self.w.scene.clear(); self.w.nodes = {}
+        self.assertIsNone(self.w.view.minimap_scale())
+        self.assertFalse(self.w.view.minimap_visible())
+
+    def test_rubber_band_selects_several_devices_and_the_panel_summarises_them(self):
+        from PyQt6.QtGui import QPainterPath
+        self.scan(self.map_devices())
+        path = QPainterPath(); path.addRect(self.w.scene.itemsBoundingRect())
+        self.w.scene.setSelectionArea(path)
+        self.app.processEvents()
+        n_real = len([d for d in self.w.devices if not d.get("virtual")])
+        self.assertEqual(len(self.w.selected_keys), n_real)
+        self.assertIsNone(self.w.current_device())
+        self.assertIn(str(n_real), self.w.side_title.text())
+        self.assertTrue(self.w.edit_btn.isHidden())                                                  # pas de renommage en masse
+        self.assertFalse(self.w.trust_btn.isHidden())
+        self.assertIn("Marquer la sélection", self.w.trust_btn.text())
+        self.assertIn("Étiquettes et groupe", self.w.meta_btn.text())
+
+    def test_selecting_one_device_restores_the_single_panel(self):
+        self.scan(self.map_devices())
+        self.w.select_all_nodes(); self.app.processEvents()
+        self.assertGreater(len(self.w.selected_keys), 1)
+        self.w.scene.clearSelection()
+        key = gui.dkey(self.w.devices[3]); self.w.nodes[key].setSelected(True); self.app.processEvents()
+        self.assertEqual(self.w.selected_keys, [key])
+        self.assertIs(self.w.current_device(), self.w.devices[3])
+        self.assertFalse(self.w.edit_btn.isHidden())
+        self.assertEqual(self.w.meta_btn.text(), "Étiquettes, notes et groupe…")
+
+    def test_trust_selection_toggles_for_all_selected_devices(self):
+        self.scan(self.map_devices())
+        keys = [gui.dkey(d) for d in self.w.devices if d["type"] in ("phone", "tv")]
+        for k in keys:
+            self.w.nodes[k].setSelected(True)
+        self.app.processEvents()
+        self.w.trust_btn.click()
+        by_key = {gui.dkey(d): d for d in self.w.devices}
+        self.assertTrue(all(by_key[k].get("trusted") for k in keys))
+        self.assertTrue(all(not d.get("trusted") for d in self.w.devices if gui.dkey(d) not in keys))   # les autres n'ont pas bougé
+        self.assertEqual(len(self.w.selected_keys), len(keys))                                      # la sélection survit au rafraîchissement
+        self.w.trust_btn.click()                                                                    # tous de confiance : le second clic retire
+        self.assertTrue(all(not d.get("trusted") for d in self.w.devices))
+
+    def test_group_and_tags_for_the_selection_add_without_erasing(self):
+        self.scan(self.map_devices())
+        a, b = [d for d in self.w.devices if d["type"] == "phone"][:2]
+        history_meta = __import__("panther.history", fromlist=["x"])
+        history_meta.set_meta(a, tags="déjà", note="ma note")
+        for d in (a, b):
+            self.w.nodes[gui.dkey(d)].setSelected(True)
+        self.app.processEvents()
+        old_exec, old_values = gui.MetaDialog.exec, gui.MetaDialog.values
+        gui.MetaDialog.exec, gui.MetaDialog.values = (lambda self: True), (lambda self: ("salon", "enfants, tv", None))
+        try:
+            self.w.meta_btn.click()
+        finally:
+            gui.MetaDialog.exec, gui.MetaDialog.values = old_exec, old_values
+        by_key = {gui.dkey(d): d for d in self.w.devices}
+        ka, kb = by_key[gui.dkey(a)], by_key[gui.dkey(b)]
+        self.assertEqual((ka["group"], kb["group"]), ("salon", "salon"))
+        self.assertEqual(sorted(ka["tags"]), ["déjà", "enfants", "tv"])                              # ajoutées aux étiquettes existantes
+        self.assertEqual(sorted(kb["tags"]), ["enfants", "tv"])
+        self.assertEqual(ka["note"], "ma note")                                                      # la note n'est pas touchée
+
+    def test_multi_meta_dialog_hides_the_note_and_keeps_the_group_empty(self):
+        dlg = gui.MetaDialog(dev("192.168.1.2", "a", "tv", group="x", tags=["t"]), ["x"], self.w, count=3)
+        self.assertEqual((dlg.group.currentText(), dlg.tags.text()), ("", ""))
+        self.assertIn("3", dlg.windowTitle())
+        self.assertIsNone(dlg.values()[2])
+        single = gui.MetaDialog(dev("192.168.1.2", "a", "tv", group="x", tags=["t"]), ["x"], self.w)
+        self.assertEqual((single.group.currentText(), single.tags.text()), ("x", "t"))
+
+    def test_center_on_selection_for_one_and_for_many(self):
+        self.scan(self.map_devices(30))
+        v = self.w.view
+        v.resetTransform(); v.scale(2, 2)
+        key = gui.dkey(self.w.devices[10]); n = self.w.nodes[key]
+        n.setSelected(True); self.app.processEvents()
+        self.w.center_on_selection()
+        c = v.mapToScene(v.viewport().rect().center())
+        self.assertLess(abs(c.x() - n.pos().x()), 20); self.assertLess(abs(c.y() - n.pos().y()), 20)
+        self.w.select_all_nodes(); self.app.processEvents()
+        self.w.center_on_selection()
+        whole = self.w.scene.itemsBoundingRect()
+        visible = v.mapToScene(v.viewport().rect()).boundingRect()
+        self.assertTrue(visible.contains(whole.center()))
+        self.w.scene.clearSelection(); self.w.selected = None; self.w.selected_keys = []
+        self.w.center_on_selection()
+        self.assertIn("Sélectionnez", self.w.status.text())
+
+    def test_shift_drag_in_empty_space_switches_to_rubber_band_then_back(self):
+        from PyQt6.QtCore import QPointF
+        from PyQt6.QtGui import QMouseEvent
+        from PyQt6.QtWidgets import QGraphicsView
+        self.scan(self.map_devices(2))
+        v = self.w.view
+        v.resetTransform(); v.centerOn(5000, 5000)                                                    # loin de tout nœud : le vide
+        pos = QPointF(40, 40)
+        v.mousePressEvent(QMouseEvent(QMouseEvent.Type.MouseButtonPress, pos, v.mapToGlobal(pos), Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.ShiftModifier))
+        self.assertEqual(v.dragMode(), QGraphicsView.DragMode.RubberBandDrag)
+        v.mouseReleaseEvent(QMouseEvent(QMouseEvent.Type.MouseButtonRelease, pos, v.mapToGlobal(pos), Qt.MouseButton.LeftButton, Qt.MouseButton.NoButton, Qt.KeyboardModifier.ShiftModifier))
+        self.assertEqual(v.dragMode(), QGraphicsView.DragMode.ScrollHandDrag)
+
+    # --- accessibilité : thèmes, taille du texte, clavier, assistant
+    @staticmethod
+    def contrast(a, b):
+        def lum(h):
+            h = h.lstrip("#")
+            c = [int(h[i:i + 2], 16) / 255 for i in (0, 2, 4)]
+            c = [x / 12.92 if x <= 0.03928 else ((x + 0.055) / 1.055) ** 2.4 for x in c]
+            return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
+        hi, lo = sorted((lum(a), lum(b)), reverse=True)
+        return (hi + 0.05) / (lo + 0.05)
+
+    def test_every_theme_meets_wcag_contrast_for_text_and_icons(self):
+        for name, t in gui.THEMES.items():
+            surfaces = [t["bg"], t["surface"], t["panel"], t["hover"]]
+            for fg in ("fg", "mut", "acc", "warn", "ok", "bad"):                                 # tout ce qui sert à écrire du texte
+                for bg in surfaces:
+                    self.assertGreaterEqual(self.contrast(t[fg], bg), 4.5, f"{name}: {fg} sur {bg}")
+            self.assertGreaterEqual(self.contrast(t["on_acc"], t["acc"]), 4.5, f"{name}: texte du bouton principal")
+            self.assertGreaterEqual(self.contrast(t["fg"], t["acc_bg"]), 4.5, f"{name}: texte sélectionné")
+            for kind, colour in gui.TYPE_COLORS.items():                                         # icônes de la carte : 3:1 suffit (éléments graphiques)
+                gui.T.update(t)
+                self.assertGreaterEqual(self.contrast(gui.type_color(kind), t["bg"]), 3.0, f"{name}: icône {kind}")
+        gui.T.update(gui.THEMES["dark"])
+        t = gui.THEMES["contrast"]
+        self.assertGreaterEqual(self.contrast(t["fg"], t["bg"]), 7.0)                           # AAA pour le thème contraste élevé
+        self.assertGreaterEqual(self.contrast(t["mut"], t["bg"]), 7.0)
+
+    def test_theme_modes_resolve_and_persist(self):
+        old = gui.system_theme
+        try:
+            gui.system_theme = lambda: "light"
+            self.assertEqual((gui.resolve_theme("auto"), gui.resolve_theme("dark"), gui.resolve_theme("contrast"), gui.resolve_theme("zzz")),
+                             ("light", "dark", "contrast", "dark"))
+            self.w.set_theme_mode("auto")
+            self.assertEqual((self.w.settings.value("theme"), gui.T["bg"]), ("auto", gui.THEMES["light"]["bg"]))
+            gui.system_theme = lambda: "dark"
+            self.w.on_system_theme()                                                              # le système passe en sombre : « auto » suit
+            self.assertEqual(gui.T["bg"], gui.THEMES["dark"]["bg"])
+            self.w.set_theme_mode("light")
+            self.w.on_system_theme()                                                              # un thème choisi à la main ne bouge plus
+            self.assertEqual(gui.T["bg"], gui.THEMES["light"]["bg"])
+            self.w.set_theme_mode("contrast")
+            self.assertEqual(gui.T["bg"], "#000000")
+            self.assertTrue(self.w.theme_actions["contrast"].isChecked())
+            self.w.set_theme_mode("nimportequoi")
+            self.assertEqual(self.w.theme_mode, "auto")
+        finally:
+            gui.system_theme = old
+
+    def test_text_size_scales_the_interface_and_the_map(self):
+        self.scan(self.map_devices(4))
+        node = next(iter(self.w.nodes.values()))
+        base_pt, base_h = self.app.font().pointSizeF(), node.boundingRect().height()
+        self.w.set_text_size("xlarge")
+        self.assertEqual((self.w.settings.value("text_size"), gui.FONT_SCALE), ("xlarge", 1.4))
+        self.assertAlmostEqual(self.app.font().pointSizeF(), base_pt * 1.4, places=1)
+        self.assertGreater(next(iter(self.w.nodes.values())).boundingRect().height(), base_h)    # la zone du nom grandit avec la police
+        self.assertIn("22px", gui.make_style())                                                   # 16 px × 1,4
+        self.w.set_text_size("normal")
+        self.assertAlmostEqual(self.app.font().pointSizeF(), base_pt, places=1)
+        self.w.set_text_size("bidon")
+        self.assertEqual(self.w.text_size, "normal")
+
+    def key(self, key, mods=None):
+        from PyQt6.QtCore import QEvent
+        from PyQt6.QtGui import QKeyEvent
+        self.w.view.keyPressEvent(QKeyEvent(QEvent.Type.KeyPress, key, mods or Qt.KeyboardModifier.NoModifier))
+        self.app.processEvents()
+
+    def test_map_is_keyboard_navigable(self):
+        self.scan(self.map_devices(6))
+        v = self.w.view
+        self.assertEqual(v.focusPolicy(), Qt.FocusPolicy.StrongFocus)
+        self.assertTrue(v.accessibleName() and v.accessibleDescription())
+        for n in v.device_nodes():                                                               # grille connue : colonnes de 100 px
+            n.setSelected(False)
+        nodes = sorted(v.device_nodes(), key=lambda n: gui.ip_key(n.dev["ip"]))
+        for i, n in enumerate(nodes):
+            n.setPos(i % 3 * 120, i // 3 * 120)
+        self.app.processEvents()
+        a = nodes[0]; a.setSelected(True); self.app.processEvents()
+        self.key(Qt.Key.Key_Right)
+        self.assertEqual(self.w.selected_keys, [gui.dkey(nodes[1].dev)])
+        self.key(Qt.Key.Key_Down)
+        self.assertEqual(self.w.selected_keys, [gui.dkey(nodes[4].dev)])
+        self.key(Qt.Key.Key_Left, Qt.KeyboardModifier.ShiftModifier)                             # Maj : on ajoute
+        self.assertEqual(set(self.w.selected_keys), {gui.dkey(nodes[4].dev), gui.dkey(nodes[3].dev)})
+        self.key(Qt.Key.Key_Escape)
+        self.assertEqual(self.w.selected_keys, [])
+        self.key(Qt.Key.Key_A, Qt.KeyboardModifier.ControlModifier)
+        self.assertEqual(len(self.w.selected_keys), len(nodes))
+        self.key(Qt.Key.Key_Escape)
+
+    def test_arrow_keys_start_from_the_centre_when_nothing_is_selected_and_stop_at_the_edges(self):
+        self.scan(self.map_devices(3))
+        self.w.scene.clearSelection(); self.app.processEvents()
+        self.key(Qt.Key.Key_Left)
+        self.assertEqual(len(self.w.selected_keys), 1)                                           # un appareil est choisi, pas d'erreur
+        only = self.w.view.device_nodes()
+        far = max(only, key=lambda n: n.pos().x())
+        self.w.scene.clearSelection(); far.setSelected(True); self.app.processEvents()
+        self.key(Qt.Key.Key_Right)                                                               # rien plus à droite : la sélection ne bouge pas
+        self.assertEqual(self.w.selected_keys, [gui.dkey(far.dev)])
+
+    def test_enter_edits_and_plus_minus_zoom(self):
+        self.scan(self.map_devices(3))
+        edited = []
+        for n in self.w.nodes.values():
+            n.edit_cb = lambda d, e=edited: e.append(d["ip"])
+        n = self.w.view.device_nodes()[0]; n.setSelected(True); self.app.processEvents()
+        self.key(Qt.Key.Key_Return)
+        self.assertEqual(edited, [n.dev["ip"]])
+        z0 = self.w.view.transform().m11()
+        self.key(Qt.Key.Key_Plus); z1 = self.w.view.transform().m11()
+        self.key(Qt.Key.Key_Minus); z2 = self.w.view.transform().m11()
+        self.assertGreater(z1, z0); self.assertAlmostEqual(z2, z0, places=6)
+
+    def test_keyboard_focus_is_visible_in_the_style(self):
+        css = gui.make_style()
+        for sel in ("QPushButton:focus", "QCheckBox:focus", "QTabBar::tab:focus", "QTableWidget:focus"):
+            self.assertIn(sel, css)
+
+    def test_welcome_wizard_flow_and_language_switch(self):
+        from panther import i18n
+        try:
+            i18n.set_language("fr")
+            wiz = gui.WelcomeWizard()
+            self.assertEqual(wiz.stack.count(), 4)
+            self.assertEqual(wiz.stack.currentIndex(), 0)
+            wiz.lang_buttons["en"].click()                                                       # les pages suivantes passent en anglais
+            self.assertEqual(i18n.language(), "en")
+            wiz.go(1)
+            self.assertEqual(wiz.next_btn.text(), "Next")
+            self.assertFalse(wiz.next_btn.isEnabled())                                           # il faut cocher l'usage responsable
+            wiz.agree.setChecked(True)
+            self.assertTrue(wiz.next_btn.isEnabled())
+            wiz.go(3)
+            self.assertEqual((wiz.next_btn.text(), wiz.step.text()), ("Finish", "Step 4 of 4"))
+            wiz.theme.setCurrentIndex(wiz.theme.findData("contrast")); wiz.size.setCurrentIndex(wiz.size.findData("large"))
+            wiz.depth.setCurrentIndex(wiz.depth.findData("rapide")); wiz.auto.setCurrentIndex(wiz.auto.findData(30)); wiz.security.setChecked(True)
+            self.assertEqual(wiz.values(), {"language": "en", "theme": "contrast", "text_size": "large", "depth": "rapide", "auto_minutes": 30,
+                                            "passive": False, "security": True})
+            wiz.lang_buttons["fr"].click()                                                       # retour au français : tout est reconstruit
+            wiz.go(1)
+            self.assertEqual(wiz.next_btn.text(), "Suivant")
+        finally:
+            i18n.set_language("fr")
+
+    def test_apply_welcome_settings_is_validated_and_marks_the_first_run_done(self):
+        st = self.w.settings
+        self.assertTrue(gui.first_run_needed(st))
+        gui.apply_welcome_settings(st, {"language": "xx", "theme": "rose", "text_size": "énorme", "depth": "dangereux", "auto_minutes": 7,
+                                        "passive": False, "security": True})
+        self.assertEqual([st.value(k) for k in ("language", "theme", "text_size", "depth", "auto_minutes")], ["fr", "auto", "normal", "normal", 0])
+        self.assertFalse(gui.first_run_needed(st))
+        self.assertTrue(str(st.value("security_consent")).lower() in ("true", "1"))
+        gui.apply_welcome_settings(st, {"language": "en", "theme": "dark", "text_size": "large", "depth": "rapide", "auto_minutes": 15,
+                                        "passive": True, "security": True})
+        self.assertEqual(str(st.value("security")).lower(), "false")                                  # écoute seule : jamais d'analyse active
+        self.assertEqual((st.value("language"), st.value("auto_minutes")), ("en", 15))
+
+    def test_reopening_the_assistant_applies_choices_live(self):
+        values = {"language": "fr", "theme": "light", "text_size": "large", "depth": "approfondi", "auto_minutes": 30, "passive": True, "security": False}
+        old = (gui.WelcomeWizard.exec, gui.WelcomeWizard.values)
+        gui.WelcomeWizard.exec, gui.WelcomeWizard.values = (lambda self: True), (lambda self: values)
+        try:
+            self.w.open_welcome()
+        finally:
+            gui.WelcomeWizard.exec, gui.WelcomeWizard.values = old
+        self.assertEqual((self.w.theme_mode, self.w.text_size, self.w.depth.currentData(), self.w.passive_on), ("light", "large", "approfondi", True))
+        self.assertEqual(gui.T["bg"], gui.THEMES["light"]["bg"])
+        self.assertTrue(self.w.auto_actions[30].isChecked())
+        self.assertFalse(self.w.depth.isEnabled())
+
+    def test_skipping_the_assistant_changes_nothing(self):
+        before = (self.w.theme_mode, self.w.passive_on, self.w.depth.currentData())
+        old = gui.WelcomeWizard.exec
+        gui.WelcomeWizard.exec = lambda self: False
+        try:
+            self.w.open_welcome()
+        finally:
+            gui.WelcomeWizard.exec = old
+        self.assertEqual((self.w.theme_mode, self.w.passive_on, self.w.depth.currentData()), before)
+
+    # --- anglais
+    FRENCH = __import__("re").compile(r"[àâçéèêëîïôùûüœ]|\b(appareils?|réseaux?|lancez|aucun[e]?|erreur|impossible|enregistr\w+|choisissez|dossier|fichier|"
+                                      r"sélectionn\w+|nouveau|nouvel|hors ligne|en ligne|avec|dans|pour|une?|des|les|est|pas|sur)\b", __import__("re").I)
+
+    def visible_texts(self, root):
+        from PyQt6.QtGui import QAction
+        from PyQt6.QtWidgets import QComboBox, QLabel, QListWidget, QMenu, QPushButton, QTableWidget, QTabWidget
+        out = set()
+        for x in root.findChildren(QWidget) + [root]:
+            out.add(x.toolTip()); out.add(x.windowTitle() if x.isWindow() else "")
+            if isinstance(x, (QLabel, QPushButton)) or hasattr(x, "placeholderText"):
+                out.add(x.text() if hasattr(x, "text") else ""); out.add(getattr(x, "placeholderText", lambda: "")())
+            if isinstance(x, QTableWidget):
+                out.update(x.horizontalHeaderItem(c).text() for c in range(x.columnCount()) if x.horizontalHeaderItem(c))
+                out.update(x.item(r, c).text() for r in range(x.rowCount()) for c in range(x.columnCount()) if x.item(r, c))
+            if isinstance(x, QComboBox):
+                out.update(x.itemText(i) for i in range(x.count()))
+            if isinstance(x, QListWidget):
+                out.update(x.item(i).text() for i in range(x.count()))
+            if isinstance(x, QTabWidget):
+                out.update(x.tabText(i) for i in range(x.count()))
+        out.update(a.text() + " " + a.toolTip() for a in root.findChildren(QAction))
+        out.update(m.title() for m in root.findChildren(QMenu))
+        return {__import__("re").sub(r"<[^>]+>", " ", t) for t in out if t.strip()}
+
+    def test_english_interface_has_no_french_leftovers(self):
+        from panther import demo, i18n
+        i18n.set_language("en")
+        try:
+            w = gui.Main(scanner=demo.DemoScanner(duration=0.1), demo=True)
+            w.show(); gui.start_demo(w)
+            w.security_on = True
+            w.start_scan(); end = time.time() + 3
+            while w.scanner.snapshot()["status"] == "scanning" and time.time() < end:
+                time.sleep(0.02)
+            w.poll(); self.app.processEvents()
+            texts = set(self.visible_texts(w)); texts.add(w.status.text())
+            for i in range(w.tabs.count()):
+                w.tabs.setCurrentIndex(i); self.app.processEvents(); texts |= self.visible_texts(w)
+            for d in list(w.devices):
+                w.selected = gui.dkey(d); w.refresh_panel(); self.app.processEvents(); texts |= self.visible_texts(w)
+            for make in (lambda: gui.DataDialog(90, 365, w), lambda: gui.AlertsDialog(w), lambda: gui.ReportScheduleDialog(w.report_settings(), w),
+                         lambda: gui.NetworksDialog("192.168.1.0/24", [], [], w), lambda: gui.RulesDialog(w, lambda: None),
+                         lambda: gui.MetaDialog(w.devices[3], ["salon"], w), lambda: gui.RuleFromDeviceDialog(w.devices[3], w),
+                         lambda: gui.EditDialog(w.devices[3], w), lambda: gui.CompareDialog(history.list_scans(), w),
+                         lambda: gui.DuplicatesDialog([(w.devices[3], w.devices[4], ["same name"])], lambda a, b: None, w), lambda: gui.MergeDialog("t", "text", w.devices[:3], w)):
+                dlg = make(); texts |= self.visible_texts(dlg); dlg.close()
+            wiz = gui.WelcomeWizard(); i18n.set_language("en"); wiz.choose_language("en")
+            texts |= {t for t in self.visible_texts(wiz) if "Welcome" not in t and "Choose your language" not in t}   # 1re page : volontairement bilingue
+            wiz.close()
+            bad = sorted(t for t in texts if self.FRENCH.search(t.replace("Français", "")))
+            self.assertEqual(bad, [])
+            self.assertGreater(len(texts), 150)                                                  # le parcours a bien vu l'interface
+            w.close()
+        finally:
+            i18n.set_language("fr")
+
+    def test_language_menu_saves_the_choice_and_warns_about_restart(self):
+        self.w.choose_language("en")
+        self.assertEqual(self.w.settings.value("language"), "en")
+        self.assertTrue(any(b[0] == "information" for b in self.boxes))
+        self.w.choose_language("fr")
+        self.assertEqual(self.w.settings.value("language"), "fr")
+
+    # --- mode démonstration
+    def test_demo_window_is_populated_from_the_fictional_network_and_never_touches_the_network(self):
+        import socket
+        from panther import demo
+        real_socket, calls = socket.socket, []
+        socket.socket = lambda *a, **k: calls.append(a) or (_ for _ in ()).throw(AssertionError("accès réseau en mode démo"))
+        try:
+            w = gui.Main(scanner=demo.DemoScanner(duration=0.2), demo=True)
+            w.notify = lambda *a: None
+            gui.start_demo(w)
+            names = {d["hostname"] for d in w.devices}
+            self.assertTrue({"box", "nas", "camera-garage", "ancien-pc"} <= names)
+            self.assertFalse(next(d for d in w.devices if d["hostname"] == "ancien-pc")["online"])   # hors ligne grâce à l'historique semé
+            self.assertIn("démonstration", w.windowTitle())
+            self.assertGreaterEqual(len(history.list_scans()), 3)
+            w.start_scan()                                                                       # le scan simulé va jusqu'au bout
+            end = time.time() + 5
+            while w.scanner.snapshot()["status"] == "scanning" and time.time() < end:
+                time.sleep(0.05)
+            w.poll(); self.app.processEvents()
+            self.assertIn("Scan terminé", w.status.text())
+            w.wake_device(next(d for d in w.devices if d["hostname"] == "ancien-pc"))
+            w.update_oui()
+            self.assertFalse(calls)
+            self.assertTrue(w.report_settings()["folder"].startswith(os.path.dirname(history.PATH)))   # jamais le dossier personnel
+            w.close()
+        finally:
+            socket.socket = real_socket
+
+    def test_demo_isolate_redirects_every_config_file_and_cleans_up(self):
+        from panther import alerts, demo, ouiupdate, rules
+        from panther import log as plog
+        saved = (history.PATH, store.PATH, alerts.PATH, rules.PATH, secrets.PATH, plog.PATH, ouiupdate.USER_PATH, os.environ.get("XDG_CONFIG_HOME"), secrets._tool)
+        tmp = None
+        try:
+            tmp = demo.isolate()
+            for path in (history.PATH, store.PATH, alerts.PATH, rules.PATH, secrets.PATH, plog.PATH, ouiupdate.USER_PATH):
+                self.assertTrue(path.startswith(tmp), path)
+            self.assertIsNone(secrets._tool())                                                     # jamais le vrai trousseau
+        finally:
+            (history.PATH, store.PATH, alerts.PATH, rules.PATH, secrets.PATH, plog.PATH, ouiupdate.USER_PATH, xdg, secrets._tool) = saved
+            if xdg is None:
+                os.environ.pop("XDG_CONFIG_HOME", None)
+            else:
+                os.environ["XDG_CONFIG_HOME"] = xdg
+            if tmp:
+                demo.cleanup(tmp)
+                self.assertFalse(os.path.exists(tmp))
+            QSettings.setPath(QSettings.Format.NativeFormat, QSettings.Scope.UserScope, self.tmp.name)
+
+    # --- rapports planifiés
+    def report_cfg(self, **kw):
+        folder = os.path.join(self.tmp.name, "rapports")
+        self.w.save_report_settings(kw.get("enabled", True), kw.get("freq", "daily"), kw.get("folder", folder), kw.get("keep", 3))
+        return folder
+
+    def test_report_tick_writes_one_pdf_when_due_then_waits(self):
+        folder = self.report_cfg()
+        self.scan([dev("192.168.1.1", "box", "router"), dev("192.168.1.20", "tv", "tv")])
+        t0 = 1_800_000_000
+        path = self.w.report_tick(t0)
+        self.assertTrue(path and os.path.isfile(path))
+        with open(path, "rb") as f:
+            self.assertEqual(f.read(5), b"%PDF-")
+        self.assertIsNone(self.w.report_tick(t0 + 3600))                                    # pas encore dû
+        self.assertEqual(len(os.listdir(folder)), 1)
+        self.assertTrue(self.w.report_tick(t0 + 24 * 3600 + 60))                            # le lendemain
+        self.assertEqual(len(os.listdir(folder)), 2)
+
+    def test_report_tick_does_nothing_when_disabled_empty_or_scanning(self):
+        folder = self.report_cfg(enabled=False)
+        self.scan([dev("192.168.1.1", "box", "router")])
+        self.assertIsNone(self.w.report_tick(1_800_000_000)); self.assertFalse(os.path.exists(folder))
+        self.report_cfg(enabled=True)
+        self.w.devices = []
+        self.assertIsNone(self.w.report_tick(1_800_000_000)); self.assertFalse(os.path.exists(folder))
+
+    def test_report_tick_prunes_old_reports_and_keeps_foreign_files(self):
+        folder = self.report_cfg(keep=2)
+        os.makedirs(folder)
+        open(os.path.join(folder, "notes.pdf"), "w").close()
+        self.scan([dev("192.168.1.1", "box", "router")])
+        for i in range(4):
+            self.assertTrue(self.w.report_tick(1_800_000_000 + i * 24 * 3600))
+        names = sorted(os.listdir(folder))
+        self.assertEqual(len([n for n in names if n.startswith("rapport-panther-")]), 2)
+        self.assertIn("notes.pdf", names)
+
+    def test_report_tick_failure_is_reported_and_not_retried_every_minute(self):
+        blocker = os.path.join(self.tmp.name, "fichier"); open(blocker, "w").close()
+        self.report_cfg(folder=os.path.join(blocker, "sous"))                               # impossible de créer ce dossier
+        self.scan([dev("192.168.1.1", "box", "router")])
+        t0 = 1_800_000_000
+        self.assertIsNone(self.w.report_tick(t0))
+        self.assertIn("impossible", self.w.status.text())
+        self.assertFalse(schedule.is_due(self.w.report_settings()["last"], t0 + 60, "daily"))
+
+    def test_report_dialog_saves_settings_and_generates_now(self):
+        self.scan([dev("192.168.1.1", "box", "router")])
+        folder = os.path.join(self.tmp.name, "dlg")
+        dlg = gui.ReportScheduleDialog(self.w.report_settings(), self.w)
+        dlg.enabled.setChecked(True); dlg.freq.setCurrentIndex(dlg.freq.findData("daily")); dlg.folder.setText(folder); dlg.keep.setValue(5)
+        dlg.generate_now()
+        self.assertTrue(dlg.generated)
+        self.assertEqual(len(os.listdir(folder)), 1)
+        self.assertIn(folder, dlg.result.text())
+        self.assertEqual(dlg.values(), (True, "daily", folder, 5))
+
+    def test_report_settings_survive_garbage_values(self):
+        self.w.settings.setValue("report_keep", "abc"); self.w.settings.setValue("report_freq", "hourly"); self.w.settings.setValue("report_last", "x")
+        cfg = self.w.report_settings()
+        self.assertEqual((cfg["keep"], cfg["freq"], cfg["last"]), (10, "weekly", 0.0))
+
+    def test_alerts_dialog_refuses_an_invalid_address_and_saves_nothing(self):
+        dlg = gui.AlertsDialog(self.w)
+        dlg.em_on.setChecked(True); dlg.em_to.setText("pas-une-adresse")
+        dlg.accept()
+        self.assertIn("adresse e-mail invalide", dlg.result.text())
+        self.assertFalse(os.path.exists(alerts.PATH))
+
+    def test_test_button_sends_with_the_typed_values_in_the_background(self):
+        calls = self.capture_dispatch()
+        dlg = gui.AlertsDialog(self.w)
+        dlg.send_test()
+        self.assertIn("Activez", dlg.result.text())                                           # rien d'actif : explication, pas d'envoi
+        dlg.wh_on.setChecked(True); dlg.wh_url.setText("https://x.example/h")
+        dlg.send_test()
+        end = time.time() + 5
+        while dlg.test_worker.isRunning() and time.time() < end:
+            self.app.processEvents(); time.sleep(0.02)
+        self.app.processEvents()
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][1]["webhook_url"], "https://x.example/h")                    # valeurs saisies, pas besoin d'enregistrer d'abord
+        self.assertEqual(calls[0][0][0]["kind"], "test")
+        self.assertIn("webhook : envoyé", dlg.result.text())
+        self.assertFalse(os.path.exists(secrets.PATH))                                        # un test n'enregistre rien
+
+    def test_clear_secrets_button(self):
+        secrets.set(alerts.SECRET_WEBHOOK, "u"); secrets.set(alerts.SECRET_SMTP, "p")
+        dlg = gui.AlertsDialog(self.w); dlg.clear_secrets()
+        self.assertEqual((secrets.get(alerts.SECRET_WEBHOOK), secrets.get(alerts.SECRET_SMTP)), (None, None))
+
+    def test_no_alert_for_the_first_analysis_then_alert_on_a_new_device_of_an_automatic_scan(self):
+        calls = self.capture_dispatch()
+        self.enable_alerts()
+        w = self.w
+        w.last_scan_auto = True
+        self.scan(network()); self.wait_workers(w)
+        self.assertEqual(calls, [])                                                            # première analyse = référence : silence
+        newcomer = dev("192.168.1.98", "camera-neuve", "camera")
+        self.scan([*network(), newcomer]); self.wait_workers(w)                                # (scan automatique : last_scan_auto reste vrai)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual([e["kind"] for e in calls[0][0]], ["new_device"])
+        self.assertIn("camera-neuve", calls[0][0][0]["title"])
+        self.assertIn("Alerte envoyée", w.status.text())
+        self.scan([*network(), newcomer]); self.wait_workers(w)
+        self.assertEqual(len(calls), 1)                                                        # le même appareil n'est plus « nouveau » : pas de répétition
+
+    def test_manual_scans_stay_quiet_unless_the_user_asked_for_them_too(self):
+        calls = self.capture_dispatch()
+        w = self.w
+        self.enable_alerts(auto_only=True)
+        self.scan(network())
+        w.last_scan_auto = False
+        w.finish_scan({"devices": [*network(), dev("192.168.1.97", "nouveau", "iot")], "networks": w.networks_info, "depth": "normal"}, 5); self.wait_workers(w)
+        self.assertEqual(calls, [])
+        self.enable_alerts(auto_only=False)
+        w.finish_scan({"devices": [*network(), dev("192.168.1.96", "autre-nouveau", "iot")], "networks": w.networks_info, "depth": "normal"}, 5); self.wait_workers(w)
+        self.assertEqual(len(calls), 1)
+
+    def test_disabled_alerts_or_no_channel_send_nothing(self):
+        calls = self.capture_dispatch()
+        w = self.w
+        self.scan(network())
+        alerts.save({"enabled": False, "webhook": {"enabled": True}})
+        w.last_scan_auto = True
+        w.finish_scan({"devices": [*network(), dev("192.168.1.95", "x", "iot")], "networks": w.networks_info, "depth": "normal"}, 5); self.wait_workers(w)
+        alerts.save({"enabled": True, "webhook": {"enabled": False}, "email": {"enabled": False}})
+        w.finish_scan({"devices": [*network(), dev("192.168.1.94", "y", "iot")], "networks": w.networks_info, "depth": "normal"}, 5); self.wait_workers(w)
+        self.assertEqual(calls, [])
+
+    def test_exposure_threshold_and_failure_reporting(self):
+        calls = self.capture_dispatch([("webhook", False, "le service a répondu 500")])
+        w = self.w
+        self.enable_alerts(new_device=False, new_exposure=True, exposure_min="critique", auto_only=False)
+        w.security_on = True
+        self.scan(network())
+        cam = dev("192.168.1.50", "cam", "camera", ports=[23, 554])
+        cam["security"] = security.analyze(cam, {554: "open"})                                  # Élevé seulement : sous le seuil « critique »
+        w.finish_scan({"devices": [*network(), cam], "networks": w.networks_info, "depth": "normal"}, 5); self.wait_workers(w)
+        self.assertEqual(calls, [])
+        redis = dev("192.168.1.51", "nas", "nas", ports=[6379]); redis["security"] = security.analyze(redis, {6379: "open"})
+        w.finish_scan({"devices": [*network(), cam, redis], "networks": w.networks_info, "depth": "normal"}, 5); self.wait_workers(w)
+        self.assertEqual(len(calls), 1)
+        self.assertIn("Redis", calls[0][0][0]["detail"])
+        self.assertIn("Alerte non envoyée", w.status.text()); self.assertIn("500", w.status.text())
+
+    # --- réveil à distance et base des fabricants
+    def offline_device(self, mac="a4:bb:cc:00:00:60", **kw):
+        d = dev("192.168.1.60", "nas-salon", "nas", mac=mac, online=False, last_seen=time.time() - 3600, **kw)
+        return d
+
+    def test_wake_on_lan_sends_to_the_network_broadcast_and_reports_it(self):
+        sent = []
+        orig = wol.send
+        wol.send = lambda mac, targets, **k: sent.append((mac, list(targets))) or 2
+        try:
+            self.w.wake_device(self.offline_device())
+        finally:
+            wol.send = orig
+        self.assertEqual(sent, [("a4:bb:cc:00:00:60", ["192.168.1.255", "255.255.255.255"])])
+        self.assertIn("Paquet de réveil envoyé à nas-salon", self.w.status.text())
+        self.assertIn("Wake-on-LAN soit activé", self.w.status.text())                       # l'utilisateur est prévenu de la condition
+
+    def test_wake_on_lan_refuses_a_random_mac_with_an_explanation(self):
+        orig = wol.send
+        wol.send = lambda *a, **k: self.fail("rien ne doit être envoyé")
+        try:
+            self.w.wake_device(self.offline_device(mac="7a:00:00:00:00:60"))
+        finally:
+            wol.send = orig
+        self.assertEqual(self.boxes[-1][0], "information")
+        self.assertIn("aléatoire", self.boxes[-1][1][1])
+
+    def test_wake_entry_is_offered_only_for_offline_devices_with_a_mac(self):
+        self.scan(network())
+        w = self.w
+        labels = []
+        import panther.gui as g
+        orig = g.QMenu.exec
+        g.QMenu.exec = lambda self_, pos=None: labels.extend(a.text() for a in self_.actions())
+        try:
+            w.device_menu(w.devices[2], g.QPointF(0, 0).toPoint())
+            self.assertFalse(any("Wake-on-LAN" in x for x in labels))
+            labels.clear()
+            off = self.offline_device(); w.devices.append(off)
+            w.device_menu(off, g.QPointF(0, 0).toPoint())
+            self.assertTrue(any("Wake-on-LAN" in x for x in labels))
+        finally:
+            g.QMenu.exec = orig
+
+    def wait_oui(self, w, timeout=5):
+        end = time.time() + timeout
+        while w.oui_worker.isRunning() and time.time() < end:
+            self.app.processEvents(); time.sleep(0.02)
+        self.app.processEvents()
+
+    def test_oui_update_asks_first_then_downloads_in_the_background_and_reports(self):
+        w = self.w
+        calls = []
+        orig = ouiupdate.update
+        ouiupdate.update = lambda *a, **k: calls.append(1) or 1234
+        try:
+            w.update_oui(); self.wait_oui(w)
+        finally:
+            ouiupdate.update = orig
+        self.assertEqual(self.boxes[0][0], "question")                                    # demande de confirmation avant tout téléchargement
+        self.assertIn(ouiupdate.URL, self.boxes[0][1][1])
+        self.assertEqual(calls, [1])
+        self.assertIn("1234", w.status.text())
+
+    def test_oui_update_declined_downloads_nothing(self):
+        w = self.w
+        gui.QMessageBox.question = staticmethod(lambda *a, **k: gui.QMessageBox.StandardButton.No)
+        orig = ouiupdate.update
+        ouiupdate.update = lambda *a, **k: self.fail("aucun téléchargement sans accord")
+        try:
+            w.update_oui()
+        finally:
+            ouiupdate.update = orig
+        self.assertFalse(getattr(w, "oui_worker", None))
+
+    def test_oui_update_failure_is_reported_without_crashing(self):
+        w = self.w
+        def boom(*a, **k):
+            raise ouiupdate.UpdateError("téléchargement impossible : hors ligne")
+        orig = ouiupdate.update
+        ouiupdate.update = boom
+        try:
+            w.update_oui(); self.wait_oui(w)
+        finally:
+            ouiupdate.update = orig
+        self.assertEqual(self.boxes[-1][0], "warning")
+        self.assertIn("hors ligne", self.boxes[-1][1][1])
+        self.assertIn("impossible", w.status.text())
+
+    # --- export de la carte et des appareils
+    def test_map_exports_to_png_and_svg_without_touching_theme_or_selection(self):
+        self.scan(network())
+        w = self.w
+        sel = w.nodes[gui.dkey(w.devices[2])]; sel.setSelected(True)
+        before = dict(gui.T)
+        png, svg = os.path.join(self.tmp.name, "carte.png"), os.path.join(self.tmp.name, "carte.svg")
+        w.write_map(png, theme="light", width=800); w.write_map(svg, theme="dark", width=800)
+        with open(png, "rb") as f:
+            self.assertEqual(f.read(8), b"\x89PNG\r\n\x1a\n")
+        img = gui.QImage(png)
+        self.assertEqual(img.width(), 800)
+        self.assertGreater(img.height(), 100)
+        with open(svg, encoding="utf-8") as f:
+            text = f.read()
+        self.assertTrue(text.lstrip().startswith("<?xml") and "<svg" in text)
+        self.assertIn("Panther", text)
+        self.assertGreater(len(text), 2000)
+        self.assertEqual(dict(gui.T), before)                                          # le thème d'affichage n'a pas bougé
+        self.assertTrue(sel.isSelected())                                              # la sélection est restaurée
+
+    def test_exporting_an_empty_map_is_refused_clearly(self):
+        with self.assertRaises(OSError):
+            self.w.write_map(os.path.join(self.tmp.name, "vide.png"))
+
+    def test_dark_and_light_png_differ_in_background(self):
+        self.scan(network())
+        light, dark = self.w.render_map_image(400, "light"), self.w.render_map_image(400, "dark")
+        self.assertNotEqual(light.pixelColor(2, 2).name(), dark.pixelColor(2, 2).name())
+
+    def test_enriched_exports_carry_metadata_and_resist_formula_injection(self):
+        self.scan([*network(), dev("192.168.1.99", "=CMD()", "iot")])
+        w = self.w
+        tv = next(d for d in w.devices if d["hostname"] == "salon-tv")
+        history.set_meta(tv, tags="enfants", group="Salon", note="meuble"); history.set_trusted([tv], True)
+        csv_path, json_path = os.path.join(self.tmp.name, "e.csv"), os.path.join(self.tmp.name, "e.json")
+        w.write_export(csv_path, "csv"); w.write_export(json_path, "json")
+        import csv, json
+        with open(csv_path, encoding="utf-8", newline="") as f:
+            rows = list(csv.DictReader(f))
+        by = {r["Adresse IP"]: r for r in rows}
+        self.assertEqual((by["192.168.1.10"]["Groupe"], by["192.168.1.10"]["Étiquettes"], by["192.168.1.10"]["De confiance"]), ("Salon", "enfants", "oui"))
+        self.assertEqual(by["192.168.1.99"]["Nom"], "'=CMD()")                           # neutralisé
+        with open(json_path, encoding="utf-8") as f:
+            data = json.load(f)
+        self.assertEqual(len(data["devices"]), 5)
+        self.assertEqual(data["networks"], [NET])
+
+    # --- étiquettes, notes et groupes
+    def tag_two_devices(self):
+        w = self.w
+        tv = next(d for d in w.devices if d["hostname"] == "salon-tv")
+        pr = next(d for d in w.devices if d["hostname"] == "imprimante")
+        history.set_meta(tv, tags="enfants, domotique", group="Salon", note="Posée sur le meuble TV")
+        history.set_meta(pr, tags="bureau", group="Bureau du fond")
+        w.refresh_views()
+        return tv, pr
+
+    def visible(self):
+        w = self.w
+        return sorted(w.table.item(r, 0).text() for r in range(w.table.rowCount()) if not w.table.isRowHidden(r))
+
+    def test_meta_dialog_is_prefilled_and_returns_what_was_typed(self):
+        self.scan(network())
+        tv, _ = self.tag_two_devices()
+        dlg = gui.MetaDialog(tv, ["Bureau du fond", "Salon"], self.w)
+        self.assertEqual((dlg.group.currentText(), dlg.tags.text(), dlg.note.toPlainText()), ("Salon", "enfants, domotique", "Posée sur le meuble TV"))
+        self.assertEqual([dlg.group.itemText(i) for i in range(dlg.group.count())], ["", "Bureau du fond", "Salon"])
+        dlg.group.setCurrentText("Chambre"); dlg.tags.setText("a, b"); dlg.note.setPlainText("n")
+        self.assertEqual(dlg.values(), ("Chambre", "a, b", "n"))
+
+    def test_tags_group_and_notes_appear_in_the_panel_and_the_table(self):
+        self.scan(network())
+        tv, _ = self.tag_two_devices()
+        w = self.w
+        w.selected = gui.dkey(tv); w.refresh_panel()
+        labels = {w.form.itemAt(r, gui.QFormLayout.ItemRole.LabelRole).widget().text(): w.form.itemAt(r, gui.QFormLayout.ItemRole.FieldRole).widget().text()
+                  for r in range(w.form.rowCount()) if w.form.itemAt(r, gui.QFormLayout.ItemRole.FieldRole) and hasattr(w.form.itemAt(r, gui.QFormLayout.ItemRole.FieldRole).widget(), "text")}
+        self.assertEqual((labels["Groupe"], labels["Étiquettes"], labels["Notes"]), ("Salon", "enfants  ·  domotique", "Posée sur le meuble TV"))
+        row = next(r for r in range(w.table.rowCount()) if w.table.item(r, 0).text() == "salon-tv")
+        self.assertEqual((w.table.item(row, 11).text(), w.table.item(row, 12).text()), ("Salon", "enfants, domotique"))
+
+    def test_filter_tokens_tag_is_exact_group_is_a_substring_and_free_text_reaches_notes(self):
+        self.scan(network())
+        self.tag_two_devices()
+        w = self.w
+        w.search.setText("tag:enfants"); self.assertEqual(self.visible(), ["salon-tv"])
+        w.search.setText("TAG:Domotique"); self.assertEqual(self.visible(), ["salon-tv"])            # casse ignorée
+        w.search.setText("tag:enf"); self.assertEqual(self.visible(), [])                              # étiquette exacte, pas un morceau
+        w.search.setText("groupe:fond"); self.assertEqual(self.visible(), ["imprimante"])              # groupe : contient le texte
+        w.search.setText("group:salon tag:enfants"); self.assertEqual(self.visible(), ["salon-tv"])    # les jetons se combinent
+        w.search.setText("group:salon tag:bureau"); self.assertEqual(self.visible(), [])
+        w.search.setText("meuble"); self.assertEqual(self.visible(), ["salon-tv"])                     # texte libre : cherche aussi dans les notes
+        w.search.setText(""); self.assertEqual(len(self.visible()), 4)
+
+    def test_metadata_survives_a_new_scan_because_it_is_keyed_by_the_device(self):
+        self.scan(network())
+        self.tag_two_devices()
+        self.scan(network())
+        tv = next(d for d in self.w.devices if d["hostname"] == "salon-tv")
+        self.assertEqual((tv["group"], tv["tags"]), ("Salon", ["enfants", "domotique"]))
 
     # --- règles de détection personnalisées
     def test_creating_a_rule_from_a_device_reclassifies_the_displayed_devices(self):

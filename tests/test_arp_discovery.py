@@ -107,6 +107,8 @@ class ArpDiscoverTests(unittest.TestCase):
 
     def test_every_profile_defines_the_arp_settings(self):
         for name, p in scanner.PROFILES.items():
+            if p.get("passive"):  # écoute seule : aucune sonde, donc aucun réglage ARP actif
+                self.assertEqual((p["arp_rounds"], p["arp_wait"]), (0, 0), name); continue
             self.assertTrue(p["arp_rounds"] >= 1 and p["arp_wait"] > 0 and p["arp_max"] >= p["arp_wait"], name)
         self.assertLess(scanner.PROFILES["rapide"]["arp_max"], scanner.PROFILES["normal"]["arp_max"])
 

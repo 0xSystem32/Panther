@@ -6,8 +6,10 @@ sens à comparer (pas de TTL ni d'heures qui changent à chaque scan). On compar
 """
 from . import security
 from . import store
+from .i18n import N_, tr
 
-FIELD_LABELS = {"ip": "Adresse IP", "name": "Nom", "type": "Type", "os": "Système", "vendor": "Fabricant"}
+# Les libellés français servent aussi d'identifiants de changement : ils ne sont traduits qu'à l'affichage (`format_change`).
+FIELD_LABELS = {"ip": N_("Adresse IP"), "name": N_("Nom"), "type": N_("Type"), "os": N_("Système"), "vendor": N_("Fabricant")}
 
 
 def format_change(label, old, new):
@@ -17,8 +19,8 @@ def format_change(label, old, new):
         old = ("−" + names(old)) if old != "—" else "—"
         new = ("+" + names(new)) if new != "—" else "—"
     if label in ("Ports ouverts", "Constats de sécurité"):
-        return f"{label} : " + "  /  ".join(x for x in (old, new) if x != "—")
-    return f"{label} : {old} → {new}"
+        return f"{tr(label)} : " + "  /  ".join(x for x in (old, new) if x != "—")
+    return f"{tr(label)} : {old} → {new}"
 
 
 def snapshot_record(d):
@@ -46,11 +48,11 @@ def compare(a, b):
                 ch.append((label, old.get(f) or "—", new.get(f) or "—"))
         po, pn = set(old.get("ports", [])), set(new.get("ports", []))
         if po != pn:
-            ch.append(("Ports ouverts", "−" + ", ".join(map(str, sorted(po - pn))) if po - pn else "—",
+            ch.append((N_("Ports ouverts"), "−" + ", ".join(map(str, sorted(po - pn))) if po - pn else "—",
                        "+" + ", ".join(map(str, sorted(pn - po))) if pn - po else "—"))
         so, sn = old.get("sec"), new.get("sec")
         if so is not None and sn is not None and set(so) != set(sn):  # comparé seulement si les deux scans ont analysé la sécurité
-            ch.append(("Constats de sécurité", "−" + ", ".join(sorted(set(so) - set(sn))) if set(so) - set(sn) else "—",
+            ch.append((N_("Constats de sécurité"), "−" + ", ".join(sorted(set(so) - set(sn))) if set(so) - set(sn) else "—",
                        "+" + ", ".join(sorted(set(sn) - set(so))) if set(sn) - set(so) else "—"))
         if ch:
             changed.append({"rec": new, "changes": ch})

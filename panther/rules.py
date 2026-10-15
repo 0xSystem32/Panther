@@ -25,6 +25,7 @@ import re
 import tempfile
 
 from . import fingerprint
+from .i18n import tr
 
 log = logging.getLogger("panther.rules")
 PATH = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"), "Panther", "rules.json")
@@ -48,17 +49,17 @@ def _regexes(value, field):
         if len(p) > MAX_PATTERN:
             raise RuleError(f"{field} : motif trop long ({len(p)} > {MAX_PATTERN})")
         if _NESTED.search(p):
-            raise RuleError(f"{field} : motif refusé (quantificateurs imbriqués, risque de blocage)")
+            raise RuleError(tr("{field} : motif refusé (quantificateurs imbriqués, risque de blocage)", field=field))
         try:
             out.append(re.compile(p, re.I))
         except re.error as e:
-            raise RuleError(f"{field} : expression régulière invalide ({e})") from None
+            raise RuleError(tr("{field} : expression régulière invalide ({e})", field=field, e=e)) from None
     return out
 
 
 def _ports(value, field):
     if not isinstance(value, list) or not value or not all(isinstance(p, int) and 0 < p < 65536 for p in value):
-        raise RuleError(f"{field} : liste de ports (1-65535) attendue")
+        raise RuleError(tr("{field} : liste de ports (1-65535) attendue", field=field))
     return set(value)
 
 
@@ -68,7 +69,7 @@ def _mac_prefixes(value):
     for p in items:
         h = re.sub(r"[^0-9a-f]", "", str(p).lower())
         if not 2 <= len(h) <= 12:
-            raise RuleError("mac_prefix : préfixe de 1 à 6 octets attendu")
+            raise RuleError(tr("mac_prefix : préfixe de 1 à 6 octets attendu"))
         out.append(h)
     return out
 
@@ -100,19 +101,19 @@ class Rule:
 def parse_rule(raw):
     """Règle brute (dict) -> Rule, ou RuleError avec un message clair."""
     if not isinstance(raw, dict):
-        raise RuleError("la règle doit être un objet")
+        raise RuleError(tr("la règle doit être un objet"))
     name = str(raw.get("name") or "").strip()[:80]
     if not name:
-        raise RuleError("nom manquant")
+        raise RuleError(tr("nom manquant"))
     kind = raw.get("type")
     if kind not in fingerprint.KINDS:
-        raise RuleError(f"type « {kind} » inconnu (types : {', '.join(fingerprint.KINDS)})")
+        raise RuleError(tr("type « {kind} » inconnu (types : {types})", kind=kind, types=', '.join(fingerprint.KINDS)))
     pts = raw.get("points", 50)
     if not isinstance(pts, (int, float)) or isinstance(pts, bool) or not 1 <= pts <= 100:
         raise RuleError("points : nombre entre 1 et 100 attendu")
     match = raw.get("match")
     if not isinstance(match, dict) or not match:
-        raise RuleError("match : au moins une condition est nécessaire (sinon la règle s'appliquerait à tout)")
+        raise RuleError(tr("match : au moins une condition est nécessaire (sinon la règle s'appliquerait à tout)"))
     unknown = set(match) - set(CONDITIONS)
     if unknown:
         raise RuleError(f"condition(s) inconnue(s) : {', '.join(sorted(unknown))}")
@@ -131,7 +132,7 @@ def parse_rule(raw):
                 raise RuleError(f"in_network : plage invalide « {v} »") from None
         elif f == "gateway":
             cond[f] = bool(v)
-    reason = str(raw.get("reason") or f"règle « {name} »")[:100]
+    reason = str(raw.get("reason") or tr("règle « {name} »", name=name))[:100]
     return Rule(name, kind, float(pts), bool(raw.get("force", False)), reason, cond)
 
 
@@ -144,32 +145,32 @@ def parse(data):
     """Contenu JSON déjà lu -> RuleSet (les règles invalides sont écartées, avec un avertissement chacune)."""
     rs = RuleSet()
     if not isinstance(data, dict):
-        rs.warnings.append("fichier de règles : un objet JSON est attendu")
+        rs.warnings.append(tr("fichier de règles : un objet JSON est attendu"))
         return rs
     raw_rules = data.get("rules", [])
     if not isinstance(raw_rules, list):
-        rs.warnings.append("« rules » doit être une liste")
+        rs.warnings.append(tr("« rules » doit être une liste"))
         raw_rules = []
     if len(raw_rules) > MAX_RULES:
-        rs.warnings.append(f"{len(raw_rules)} règles : seules les {MAX_RULES} premières sont lues")
+        rs.warnings.append(tr("{count} règles : seules les {maximum} premières sont lues", count=len(raw_rules), maximum=MAX_RULES))
     for i, raw in enumerate(raw_rules[:MAX_RULES], 1):
         try:
             rs.rules.append(parse_rule(raw))
         except RuleError as e:
             label = raw.get("name") if isinstance(raw, dict) and raw.get("name") else f"n°{i}"
-            rs.warnings.append(f"règle {label} ignorée : {e}")
+            rs.warnings.append(tr("règle {label} ignorée : {e}", label=label, e=e))
     for i, m in enumerate(data.get("models", []) if isinstance(data.get("models"), list) else [], 1):
         try:
             rx = _regexes(m.get("pattern"), "pattern")[0]
             name = str(m.get("name") or "").strip()[:80]
             if not name:
-                raise RuleError("nom manquant")
+                raise RuleError(tr("nom manquant"))
             kind = m.get("type")
             if kind is not None and kind not in fingerprint.KINDS:
-                raise RuleError(f"type « {kind} » inconnu")
+                raise RuleError(tr("type « {kind} » inconnu", kind=kind))
             rs.models.append((rx, name, kind))
         except (RuleError, AttributeError, IndexError) as e:
-            rs.warnings.append(f"modèle n°{i} ignoré : {e}")
+            rs.warnings.append(tr("modèle n°{i} ignoré : {e}", i=i, e=e))
     return rs
 
 
@@ -278,12 +279,12 @@ def make_rule(dev, kind, criteria, name=None):
     """Construit une règle à partir d'un appareil : `criteria` ⊂ {hostname, vendor, ports, mdns, mac}.
     Lève RuleError si aucun critère exploitable n'est retenu."""
     if kind not in fingerprint.KINDS:
-        raise RuleError(f"type « {kind} » inconnu")
+        raise RuleError(tr("type « {kind} » inconnu", kind=kind))
     v = _view(dev)
     match = {}
     if "hostname" in criteria and v["hostname"] and v["hostname"] != dev.get("ip"):
         match["hostname"] = "^" + re.escape(v["hostname"]) + "$"
-    if "vendor" in criteria and v["vendor"] and v["vendor"] != "MAC aléatoire":
+    if "vendor" in criteria and v["vendor"] and v["vendor"] not in ("MAC aléatoire", tr("MAC aléatoire")):
         match["vendor"] = "^" + re.escape(v["vendor"]) + "$"
     if "ports" in criteria and v["ports"]:
         match["ports_all"] = sorted(v["ports"])[:4]
@@ -292,7 +293,7 @@ def make_rule(dev, kind, criteria, name=None):
     if "mac" in criteria and len(v["mac"]) >= 6 and not fingerprint.is_random_mac(dev.get("mac", "")):
         match["mac_prefix"] = ":".join(v["mac"][i:i + 2] for i in range(0, 6, 2))
     if not match:
-        raise RuleError("aucun critère exploitable pour cet appareil (nom, fabricant, ports, services ou MAC)")
+        raise RuleError(tr("aucun critère exploitable pour cet appareil (nom, fabricant, ports, services ou MAC)"))
     label = name or f"{dev.get('hostname') or dev.get('ip')} → {kind}"
     return {"name": label[:80], "type": kind, "points": 70, "match": match}
 
