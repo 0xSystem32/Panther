@@ -80,6 +80,14 @@ Linux, Python ≥ 3.12. Aucun droit root pour scanner (sauf l'écoute LLDP/CDP, 
 
     ./run.sh                  # crée .venv, installe PyQt6 au premier lancement, ouvre la fenêtre
 
+**Script d'installation** (sans droits administrateur ; environnement virtuel privé, lanceur, entrée de menu)
+
+    ./installer/install.sh               # Linux et macOS
+    powershell -ExecutionPolicy Bypass -File installer\install.ps1    # Windows
+    ./installer/install.sh --uninstall   # vos réglages dans ~/.config/Panther sont conservés
+
+Le scan réseau ne fonctionne que sous Linux pour le moment ; sous macOS et Windows, le script installe l'interface et `panther --demo`. Les scripts macOS et Windows n'ont pas encore été exécutés sur ces systèmes.
+
 **Avec pipx**
 
     pipx install .            # ou : pipx install dist/panther_netscan-0.1.0-py3-none-any.whl

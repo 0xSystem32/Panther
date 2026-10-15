@@ -49,3 +49,34 @@ class PackagingTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class InstallerTests(unittest.TestCase):
+    def test_scripts_exist_and_have_no_personal_data(self):
+        for name in ("install.sh", "install.ps1"):
+            text = read("installer", name)
+            self.assertNotRegex(text, r"/home/\w|C:\\Users\\\w|@\w+\.\w+", name)
+
+    def test_unix_installer_installs_and_uninstalls_in_a_private_home(self):
+        import shutil
+        import subprocess
+        import tempfile
+        if not shutil.which("sh") or os.uname().sysname != "Linux":
+            self.skipTest("Linux requis")
+        with tempfile.TemporaryDirectory() as home:
+            env = {**os.environ, "HOME": home, "XDG_DATA_HOME": os.path.join(home, "data"), "PANTHER_NO_DEPS": "1"}
+            script = os.path.join(ROOT, "installer", "install.sh")
+            r = subprocess.run(["sh", script], env=env, capture_output=True, text=True, timeout=300)
+            if r.returncode and "No matching distribution" in r.stderr + r.stdout:
+                self.skipTest("pas de réseau pour construire le paquet")
+            self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+            launcher = os.path.join(home, ".local", "bin", "panther")
+            self.assertTrue(os.access(launcher, os.X_OK))
+            self.assertTrue(os.path.exists(os.path.join(home, "data", "applications", "panther.desktop")))
+            v = subprocess.run([launcher, "--help"], env=env, capture_output=True, text=True, timeout=60)
+            self.assertEqual(v.returncode, 0, v.stderr)
+            self.assertIn("--demo", v.stdout)
+            u = subprocess.run(["sh", script, "--uninstall"], env=env, capture_output=True, text=True, timeout=60)
+            self.assertEqual(u.returncode, 0)
+            self.assertFalse(os.path.exists(launcher))
+            self.assertFalse(os.path.exists(os.path.join(home, "data", "panther")))

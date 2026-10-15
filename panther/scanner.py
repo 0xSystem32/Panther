@@ -14,6 +14,7 @@ import socket
 import ssl
 import struct
 import subprocess
+import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -65,6 +66,8 @@ PORT_NAMES = {2323: "Telnet-alt", 2375: "Docker", 5984: "CouchDB", 8554: "RTSP-a
 
 def local_network(iface=None):
     """Interface, IP, réseau et passerelle. Sans `iface` : celle de la route par défaut."""
+    if not sys.platform.startswith("linux"):
+        raise RuntimeError(tr("Le scan réseau n'est géré que sous Linux pour le moment (le mode --demo fonctionne partout)."))
     if iface is None:
         m = re.search(r"default via (\S+) dev (\S+)", networks._run(["ip", "-4", "route", "show", "default"]))
         if not m:

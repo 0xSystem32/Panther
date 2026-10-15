@@ -12,6 +12,7 @@ All notable changes are listed here. Format: [Keep a Changelog](https://keepacha
   two extra ranges in the lab).
 
 ### Added
+- **Installer**: `installer/install.sh` (Linux, macOS) and `installer/install.ps1` (Windows), per-user, with uninstall. Scanning stays Linux-only and says so clearly elsewhere.
 - **Detection**: custom rules (`rules.json`), HTTP(S) title/realm, HTTPS certificate, WS-Discovery, full NetBIOS, DHCP leases,
   readable model names.
 - **Features**: tags, notes and groups; alerts (Discord, Slack, ntfy, JSON, SMTP); scheduled PDF reports; PNG/SVG map export;

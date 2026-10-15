@@ -1755,4 +1755,6 @@ EN = {
         "Nothing to report for this period.",
     "Résumé de la période…":
         "Period summary…",
+    "Le scan réseau n'est géré que sous Linux pour le moment (le mode --demo fonctionne partout).":
+        "Network scanning is only supported on Linux for now (--demo mode works everywhere).",
 }
