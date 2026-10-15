@@ -151,7 +151,6 @@ class Main(QMainWindow, ScanMixin, MapMixin, TablesMixin, PanelMixin, DevicesMix
         sep = QFrame(); sep.setObjectName("sep")
         self.form = QFormLayout(); self.form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         self.form.setHorizontalSpacing(16); self.form.setVerticalSpacing(10)
-        self.form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
         self.edit_btn = QPushButton(tr("Modifier le nom / le type…"))
         self.edit_btn.clicked.connect(lambda: self.edit_device(self.current_device()))
         self.trust_btn = QPushButton()
@@ -162,6 +161,7 @@ class Main(QMainWindow, ScanMixin, MapMixin, TablesMixin, PanelMixin, DevicesMix
         bl.addLayout(head); bl.addWidget(sep); bl.addLayout(self.form); bl.addStretch(1)
         scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff); scroll.setWidget(body)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)  # largeur stable : sinon la barre qui apparaît après coup rétrécit le texte et coupe les dernières lignes
         sl.addWidget(scroll, 1); sl.addWidget(self.edit_btn); sl.addWidget(self.meta_btn); sl.addWidget(self.trust_btn)
 
         split = QSplitter(); split.addWidget(tabs); split.addWidget(self.side)

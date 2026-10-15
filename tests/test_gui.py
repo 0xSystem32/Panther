@@ -10,7 +10,7 @@ HAS_QT = importlib.util.find_spec("PyQt6") is not None
 
 if HAS_QT:
     from PyQt6.QtCore import QPointF, QSettings, Qt
-    from PyQt6.QtWidgets import QApplication, QMenu, QTableWidget, QWidget
+    from PyQt6.QtWidgets import QApplication, QLabel, QMenu, QTableWidget, QWidget
 
     from panther import alerts, gui, history, ouiupdate, reportpdf, rules, schedule, secrets, security, store, wol
     from panther.ui import dialogs, theme
@@ -885,6 +885,20 @@ class GuiTests(unittest.TestCase):
             self.assertLessEqual(wv.width(), self.w.side.width())
         texts = [wv.toPlainText() for wv in self.w.side.findChildren(WrappedValue)]
         self.assertIn("2001:db8:0:1:5054:ff:fe12:3456\nfe80::5054:ff:fe12:3456", texts)   # le texte copié n'est pas modifié
+
+    def test_wrapped_labels_in_the_panel_are_never_taller_than_their_row(self):
+        """Une étiquette multiligne dont la ligne du formulaire est plus courte que son texte est coupée en bas (le défaut vu à l'écran)."""
+        d = dev("192.168.1.1", "box", "router", [80], is_gateway=True)
+        d.update(reasons=["passerelle par défaut du réseau", "UPnP : passerelle Internet", "annonce mDNS _mqtt._tcp", "fabricant Netgear"],
+                 mdns_services=["_http._tcp", "_mqtt._tcp", "_ssw._tcp"], confidence=100)
+        self.scan([d, dev("192.168.1.13", "debian", "desktop", is_self=True)])
+        for width in (1000, 760):
+            self.w.resize(width, 700); self.app.processEvents()
+            self.w.selected = gui.dkey(self.w.devices[0]); self.w.selected_keys = [self.w.selected]
+            self.w.refresh_panel(); self.app.processEvents(); self.app.processEvents()
+            for lab in self.w.side.findChildren(QLabel):
+                if lab.wordWrap() and lab.isVisible() and lab.width() > 20:
+                    self.assertGreaterEqual(lab.height(), lab.heightForWidth(lab.width()), f"{lab.text()[:30]!r} à {width} px")
 
     def test_wrapped_value_grows_in_height_when_the_panel_gets_narrower(self):
         from panther.ui.widgets import WrappedValue

@@ -29,6 +29,23 @@ class PresenceBar(QWidget):
             p.drawRoundedRect(QRectF(i * cell, 2, max(cell - 3, 1.5), 14), 2, 2)
 
 
+class WrapLabel(QLabel):
+    """Étiquette multiligne dont la hauteur suit toujours sa largeur réelle. Dans un formulaire placé dans une zone défilante, Qt calcule parfois
+    la hauteur de la ligne pour une autre largeur que celle finalement donnée : la fin du texte était alors coupée."""
+
+    def __init__(self, text="", parent=None):
+        super().__init__(text, parent)
+        self.setWordWrap(True)
+        self.setTextFormat(Qt.TextFormat.PlainText)
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        h = self.heightForWidth(self.width())
+        if h > 0 and h != self.minimumHeight():
+            self.setMinimumHeight(h)
+            self.updateGeometry()
+
+
 class WrappedValue(QTextEdit):
     """Valeur qui se coupe n'importe où quand un mot est plus large que la place (adresse IPv6, MAC, bannière sans espace), sinon QLabel
     déborde. Lecture seule, sans cadre, texte sélectionnable et copiable tel quel (aucun caractère ajouté)."""

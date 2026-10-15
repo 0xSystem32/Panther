@@ -3,7 +3,7 @@ import sqlite3
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
-from PyQt6.QtWidgets import QLabel, QMessageBox, QSizePolicy
+from PyQt6.QtWidgets import QLabel, QMessageBox
 
 from .. import fingerprint, history, models, security
 from ..i18n import plural, tr
@@ -11,7 +11,7 @@ from .dialogs import MetaDialog
 from .icons import type_pixmap
 from .theme import sev_color
 from .util import EVENT_LABELS, LABELS, tip, when, when_short
-from .widgets import LatencyChart, PresenceBar, WrappedValue
+from .widgets import LatencyChart, PresenceBar, WrapLabel, WrappedValue
 
 
 class PanelMixin:
@@ -25,9 +25,8 @@ class PanelMixin:
         if WrappedValue.needed(value):  # adresse IPv6, MAC, bannière sans espace : un QLabel déborderait du panneau
             self.form.addRow(k, WrappedValue(str(value), mono))
             return
-        v = QLabel(str(value)); v.setTextFormat(Qt.TextFormat.PlainText); v.setWordWrap(True)
+        v = WrapLabel(str(value))
         v.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        v.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)  # le texte passe à la ligne, il n'élargit pas le panneau
         if mono:
             v.setFont(QFont("monospace", 9))
         self.form.addRow(k, v)
@@ -35,7 +34,7 @@ class PanelMixin:
     def add_finding_row(self, f):
         k = QLabel(security.LABELS[f["severity"]]); k.setStyleSheet(f"color: {sev_color(f['severity'])}; font-weight: 600;")
         text = f["title"] + (tr("  (port {port})", port=f['port']) if f.get("port") else "") + (tr("\nÀ faire : {remedy}", remedy=f['remedy']) if f["remedy"] else "")
-        v = QLabel(text); v.setTextFormat(Qt.TextFormat.PlainText); v.setWordWrap(True)
+        v = WrapLabel(text)
         v.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         if f["detail"]:
             v.setToolTip(tip(f["detail"]))
