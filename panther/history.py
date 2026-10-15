@@ -7,6 +7,7 @@ nouvel appareil, changement d'IP, passage hors ligne, retour en ligne, confiance
 import hashlib
 import json
 import os
+import re
 import sqlite3
 import time
 
@@ -543,6 +544,33 @@ def recent_events(limit=300, key=None):
         if key:
             q += " WHERE key=?"; args.append(key)
         return [dict(r) for r in con.execute(q + " ORDER BY ts DESC, id DESC LIMIT ?", (*args, limit))]
+    finally:
+        con.close()
+
+
+_IP_LIKE = re.compile(r"[0-9a-fA-F:.]{2,45}")
+SUMMARY_KINDS = ("first_seen", "offline", "online", "exposure", "exposure_fixed", "ip_changed")
+
+
+def period_summary(days=7, now=None, limit=200):
+    """Ce qui s'est passé sur la période : {days, scans, groups: {kind: [{ts, name, detail, key}]}, devices: {kind: nombre d'appareils distincts}}.
+    Lecture seule du journal. Les listes sont bornées (`limit` par catégorie) ; les nombres, eux, sont exacts."""
+    now = time.time() if now is None else now
+    since = now - days * 86400
+    con = _connect()
+    try:
+        scans = con.execute("SELECT COUNT(*) FROM scans WHERE ts>=?", (since,)).fetchone()[0]
+        groups: dict = {k: [] for k in SUMMARY_KINDS}
+        distinct: dict = {k: set() for k in SUMMARY_KINDS}
+        marks = ",".join("?" * len(SUMMARY_KINDS))
+        for r in con.execute(f"SELECT ts, key, name, kind, detail FROM events WHERE ts>=? AND kind IN ({marks}) ORDER BY ts DESC, id DESC",
+                             (since, *SUMMARY_KINDS)):
+            if r["kind"] == "first_seen" and not _IP_LIKE.fullmatch(r["detail"] or ""):
+                continue  # la première analyse (référence) n'est pas une arrivée : son détail est un texte, celui d'une vraie arrivée est l'adresse IP
+            distinct[r["kind"]].add(r["key"] or r["name"])
+            if len(groups[r["kind"]]) < limit:
+                groups[r["kind"]].append({"ts": r["ts"], "name": r["name"] or "", "detail": r["detail"] or "", "key": r["key"]})
+        return {"days": days, "scans": scans, "groups": groups, "devices": {k: len(v) for k, v in distinct.items()}}
     finally:
         con.close()
 

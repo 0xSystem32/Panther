@@ -13,6 +13,7 @@ if HAS_QT:
     from PyQt6.QtWidgets import QApplication, QLabel, QMenu, QTableWidget, QWidget
 
     from panther import alerts, gui, history, networks, ouiupdate, reportpdf, rules, schedule, secrets, security, store, wol
+    from panther.ui import devices as ui_devices
     from panther.ui import dialogs, theme
 
 NET = "192.168.1.0/24"
@@ -1484,6 +1485,74 @@ class GuiTests(unittest.TestCase):
         w.on_scan_button()
         self.assertEqual(called, [1])
         self.assertFalse(w.btn.isEnabled())                                      # « arrêt en cours » : on évite le double clic
+
+    # --- bandeau « nouveaux appareils »
+    def test_new_devices_banner_appears_only_after_the_baseline(self):
+        w = self.w
+        self.scan(network())
+        self.assertTrue(w.new_bar.isHidden())                                    # première analyse : tout est « connu », rien à signaler
+        self.scan([*network(), dev("192.168.1.97", "camera-neuve", "camera")])
+        self.assertFalse(w.new_bar.isHidden())
+        self.assertIn("1 nouvel appareil", w.new_bar.text.text())
+        self.assertIn("camera-neuve", w.new_bar.text.text())
+        self.assertFalse(w.new_bar.name_btn.isVisibleTo(w.new_bar), "nom déjà utile : rien à proposer")
+        self.scan([*network(), dev("192.168.1.97", "camera-neuve", "camera")])
+        self.assertTrue(w.new_bar.isHidden(), "le scan suivant ne trouve plus rien de nouveau")
+
+    def test_banner_names_anonymous_devices_with_a_suggestion(self):
+        w = self.w
+        self.scan(network())
+        anon = dev("192.168.1.98", "device-32", "phone", vendor="Samsung Electronics Co.,Ltd", mac="00:1a:2b:00:00:62")
+        self.scan([*network(), anon])
+        self.assertTrue(w.new_bar.name_btn.isVisibleTo(w.new_bar))
+        seen = {}
+
+        class Fake:
+            def __init__(self, d, parent=None, suggestion=""):
+                seen["suggestion"] = suggestion
+
+            def exec(self):
+                return True
+
+            def values(self):
+                return seen["suggestion"], None
+        real, ui_devices.EditDialog = ui_devices.EditDialog, Fake
+        try:
+            w.name_new_devices()
+        finally:
+            ui_devices.EditDialog = real
+        self.assertEqual(seen["suggestion"], "Téléphone Samsung")
+        self.assertEqual(store.load()["00:1a:2b:00:00:62"]["name"], "Téléphone Samsung")
+        self.assertTrue(w.new_bar.isHidden(), "le seul nouvel appareil est nommé : le bandeau disparaît")
+
+    def test_banner_see_button_selects_the_new_device_on_the_map(self):
+        w = self.w
+        self.scan(network())
+        self.scan([*network(), dev("192.168.1.97", "camera-neuve", "camera")])
+        w.see_new_devices()
+        self.assertEqual(w.selected, "aa:00:00:00:00:61")
+        self.assertEqual(w.tabs.currentIndex(), 0)
+
+    # --- résumé de la période
+    def test_period_summary_dialog_counts_and_lists_changes(self):
+        self.scan(network())
+        self.scan([*network(), dev("192.168.1.97", "camera-neuve", "camera")])
+        dlg = dialogs.SummaryDialog(self.w)
+        self.assertEqual(dlg.cards["first_seen"].text(), "1")
+        self.assertEqual(dlg.cards["offline"].text(), "0")
+        top = [dlg.tree.topLevelItem(i).text(0) for i in range(dlg.tree.topLevelItemCount())]
+        self.assertTrue(any(t.startswith("Nouveaux appareils") for t in top), top)
+        self.assertIn("camera-neuve", dlg.tree.topLevelItem(0).child(0).text(0))
+        dlg.period.setCurrentIndex(0)                                          # 24 h : toujours la même chose, sans erreur
+        self.assertEqual(dlg.cards["first_seen"].text(), "1")
+
+    def test_period_summary_dialog_is_calm_when_nothing_happened(self):
+        dlg = dialogs.SummaryDialog(self.w)
+        self.assertEqual(dlg.tree.topLevelItem(0).text(0), "Rien à signaler sur cette période.")
+
+    def test_file_menu_offers_the_period_summary(self):
+        texts = [a.text() for a in self.w.menuBar().actions()[0].menu().actions()]
+        self.assertIn("Résumé de la période…", texts)
 
 
 if __name__ == "__main__":

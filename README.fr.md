@@ -24,7 +24,7 @@ compare deux scans et exporte des rapports PDF. Le moteur de scan est **écrit �
   Une **mini-carte** apparaît quand on zoome (clic ou glisser pour se déplacer), **Maj + glisser** sélectionne plusieurs
   appareils (ou **Ctrl + clic**) et la sélection peut être marquée de confiance ou étiquetée d'un coup ; *Affichage →
   Centrer sur la sélection* (`Ctrl+Maj+0`) retrouve un appareil.
-- **Plusieurs réseaux et VLAN** : les réseaux auxquels cette machine est déjà reliée (autres interfaces, routes, VLAN) sont scannés d'office ; plages saisies à la main ou détectées (routes, interfaces 802.1Q, passerelles),
+- **Plusieurs réseaux et VLAN** : les réseaux auxquels cette machine est déjà reliée (autres interfaces, routes, VLAN) sont scannés d'office (les VLAN étiquetés par ARP : MAC, fabricant, type) ; plages saisies à la main ou détectées (routes, interfaces 802.1Q, passerelles),
   chemin traceroute, avertissement si un réseau ne répond pas, **SNMP** en lecture seule (adresses MAC et ports de
   switch d'autres VLAN), voisins **LLDP/CDP**.
 - **IPv6 (adresses)** : les adresses IPv6 de chaque appareil (lues dans la table des voisins du noyau après un ping multicast) sont affichées dans le panneau et exportées ; la découverte reste en IPv4.
@@ -42,6 +42,7 @@ compare deux scans et exporte des rapports PDF. Le moteur de scan est **écrit �
 - **Alertes** (webhook Discord / Slack / ntfy / JSON, ou e-mail SMTP) : un message groupé par scan pour un nouvel appareil, une
   nouvelle exposition ou un appareil de confiance hors ligne ; l'URL du webhook et le mot de passe SMTP sont rangés dans le
   trousseau du système (ou un fichier privé), jamais dans les réglages.
+- **Au quotidien** : un bandeau quand un scan trouve de nouveaux appareils (*Voir*, ou *Nommer…* avec un nom proposé comme « Téléphone Samsung ») et *Fichier → Résumé de la période* (arrivées, départs, expositions sur 24 h / 7 j / 30 j).
 - **Rapports** : PDF (résumé, carte, changements, appareils, exposition), Markdown (sécurité), JSON et CSV enrichis (confiance,
   étiquettes, historique), carte en PNG ou SVG ; **rapport PDF planifié** (tous les jours ou toutes les semaines) dans un
   dossier choisi, avec suppression des plus anciens (menu Fichier → « Rapports planifiés… »).
@@ -183,6 +184,7 @@ limite la taille des plages, n'écoute que sur `127.0.0.1` pour son interface we
     python3 -m unittest discover -s tests -t .                       # moteur (bibliothèque standard seule)
     QT_QPA_PLATFORM=offscreen .venv/bin/python -m unittest discover -s tests -t .   # + interface et PDF (PyQt6)
     python3 tools/i18n_check.py                                      # tous les textes sont traduits
+    python3 tools/lab.py [--hosts 200] [--snmp]                      # scanne un réseau virtuel (VLAN, routeur, SNMP, LLDP), sans root
     ruff check panther tests tools && mypy                           # analyse statique (voir CONTRIBUTING.md)
     python3 tools/update_oui.py                                      # met à jour la base des fabricants (IEEE)
     QT_QPA_PLATFORM=offscreen .venv/bin/python tools/make_screenshots.py [fr|en]   # régénère captures et GIF (réseau fictif)

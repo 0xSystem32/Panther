@@ -6,6 +6,12 @@ All notable changes are listed here. Format: [Keep a Changelog](https://keepacha
 
 ## [Unreleased]
 
+### Fixed
+- Networks that this machine already carries on another interface (tagged VLAN) are now scanned through ARP (MAC, vendor, type, VLAN
+  number; own address recognised) instead of being treated as routed.
+- Host probing on routed ranges tries every port at once: an empty /24 costs one timeout instead of one per port (2.5 minutes → 30 s for
+  two extra ranges in the lab).
+
 ### Added
 - **Detection**: custom rules (`rules.json`), HTTP(S) title/realm, HTTPS certificate, WS-Discovery, full NetBIOS, DHCP leases,
   readable model names.
@@ -17,6 +23,11 @@ All notable changes are listed here. Format: [Keep a Changelog](https://keepacha
   multi-selection, system/dark/light/high-contrast themes, adjustable text size, keyboard navigation, a first-launch window that only asks for the language; deep scan and the security analysis are on by default and, like listen-only, set in the Scan menu.
 - **Quality**: `panther/gui.py` split into the `panther/ui/` package; ruff and mypy clean; fuzz, performance and packaging tests;
   coverage gate in CI; `CONTRIBUTING.md`, pre-commit, issue templates.
+- **Day to day**: a banner under the toolbar when a scan finds new devices (Show / Name… with a suggested name built from the type and
+  vendor, e.g. “Téléphone Samsung”); *File → Period summary* (new, offline, exposures, fixed over 24 h / 7 / 30 days); the “Networks”
+  button is now “Ranges to scan” with an explanatory tooltip.
+- **Network lab**: `tools/lab.py` builds a virtual network without root (user + network namespaces: 802.1Q VLANs, a router, hosts with
+  real services, a fake SNMP switch, real LLDP/CDP frames); `tests/test_lab.py` scans it end to end (skipped where the kernel forbids it).
 - **Packaging**: man page, bash and zsh completions, release workflow (wheel + .deb attached to a GitHub release on `v*` tags).
 
 - **Late additions**: latency curve per device, saved scan profiles, SNMP v3 (authNoPriv), TLS certificate read from servers that demand a client certificate (set-top boxes), animated final map layout, iPhone 16 models, IPv6 addresses per device.

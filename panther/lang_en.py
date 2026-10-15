@@ -1227,10 +1227,6 @@ EN = {
         "Language",
     "La langue sera appliquée au prochain démarrage de Panther.":
         "The language will be applied the next time Panther starts.",
-    "Réseaux ({n})":
-        "Networks ({n})",
-    "Réseaux…":
-        "Networks…",
     "  ·  +{n} autre(s) réseau(x)":
         "  ·  +{n} other network(s)",
     "  ·  passerelle {gateway}":
@@ -1707,4 +1703,56 @@ EN = {
         "Automatically add the networks this machine is already connected to (other interfaces, routes, VLANs)",
     "Rien n'est sondé pour les trouver : Panther lit les interfaces et les routes du système. Les interfaces virtuelles (Docker, machines virtuelles) sont ignorées.":
         "Nothing is probed to find them: Panther reads the system's interfaces and routes. Virtual interfaces (Docker, virtual machines) are ignored.",
+    "{n} nouvel appareil : {names}":
+        "{n} new device: {names}",
+    "{n} nouveaux appareils : {names}":
+        "{n} new devices: {names}",
+    "\nNom proposé d'après le type et le fabricant : modifiez-le si besoin.":
+        "\nName suggested from the type and vendor: change it if needed.",
+    "Les réseaux scannés : le vôtre, plus vos autres VLAN ou interfaces (ajoutés tout seuls) et les plages saisies à la main.\nCliquez pour ajouter un VLAN ou un sous-réseau, ou pour configurer SNMP.":
+        "The networks that get scanned: yours, plus your other VLANs or interfaces (added automatically) and the ranges you typed.\nClick to add a VLAN or a subnet, or to set up SNMP.",
+    "Plages à scanner ({n})":
+        "Ranges to scan ({n})",
+    "Plages à scanner…":
+        "Ranges to scan…",
+    "Voir":
+        "Show",
+    "Nommer…":
+        "Name…",
+    "Masquer":
+        "Hide",
+    "Nouveaux appareils":
+        "New devices",
+    "Passés hors ligne":
+        "Went offline",
+    "Revenus en ligne":
+        "Back online",
+    "Nouvelles expositions":
+        "New exposures",
+    "Expositions corrigées":
+        "Exposures fixed",
+    "Changements d'adresse IP":
+        "IP address changes",
+    "Dernières 24 heures":
+        "Last 24 hours",
+    "7 derniers jours":
+        "Last 7 days",
+    "30 derniers jours":
+        "Last 30 days",
+    "Résumé de la période":
+        "Period summary",
+    "Détail des changements":
+        "Details of the changes",
+    "scan sur la période":
+        "scan in this period",
+    "scans sur la période":
+        "scans in this period",
+    "Période":
+        "Period",
+    "Historique indisponible ({e})":
+        "History unavailable ({e})",
+    "Rien à signaler sur cette période.":
+        "Nothing to report for this period.",
+    "Résumé de la période…":
+        "Period summary…",
 }

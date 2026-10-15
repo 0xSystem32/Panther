@@ -21,11 +21,13 @@ from PyQt6.QtWidgets import (
     QSpinBox,
     QTableWidget,
     QTableWidgetItem,
+    QTreeWidget,
+    QTreeWidgetItem,
     QVBoxLayout,
 )
 
 from .. import compare, fingerprint, history, privacy, rules, store
-from ..i18n import N_, plural, tr
+from ..i18n import N_, TrDict, plural, tr
 from .icons import type_pixmap
 from .theme import T
 from .util import LABELS, human_size, seen_label, tip, when
@@ -39,12 +41,12 @@ def log_path():
 class EditDialog(QDialog):
     """Nom et type choisis à la main (mémorisés par adresse MAC)."""
 
-    def __init__(self, dev, parent=None):
+    def __init__(self, dev, parent=None, suggestion=""):
         super().__init__(parent)
         self.setWindowTitle(tr("Modifier l'appareil"))
         self.setMinimumWidth(380)
         auto = dev.get("auto_type", dev["type"])
-        self.name = QLineEdit(dev["hostname"] if dev.get("custom") and "auto_hostname" in dev else "")
+        self.name = QLineEdit(dev["hostname"] if dev.get("custom") and "auto_hostname" in dev else suggestion)
         self.name.setPlaceholderText(dev.get("auto_hostname", dev["hostname"]) or dev["ip"])
         self.name.setMaxLength(60)
         self.kind = QComboBox()
@@ -56,7 +58,9 @@ class EditDialog(QDialog):
         form = QFormLayout()
         form.addRow(tr("Nom"), self.name)
         form.addRow(tr("Type"), self.kind)
-        note = QLabel(tr("Mémorisé pour l'adresse MAC {mac}.", mac=dev['mac'] or dev['ip']))
+        note = QLabel(tr("Mémorisé pour l'adresse MAC {mac}.", mac=dev['mac'] or dev['ip'])
+                      + (tr("\nNom proposé d'après le type et le fabricant : modifiez-le si besoin.") if suggestion else ""))
+        note.setWordWrap(True)
         note.setObjectName("muted")
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         buttons.button(QDialogButtonBox.StandardButton.Ok).setText(tr("Enregistrer"))
@@ -463,3 +467,65 @@ class DataDialog(QDialog):
 
     def values(self):
         return self.sp_scans.value(), self.sp_events.value()
+
+
+SUMMARY_TITLES = TrDict({"first_seen": N_("Nouveaux appareils"), "offline": N_("Passés hors ligne"), "online": N_("Revenus en ligne"),
+                         "exposure": N_("Nouvelles expositions"), "exposure_fixed": N_("Expositions corrigées"),
+                         "ip_changed": N_("Changements d'adresse IP")})
+SUMMARY_PERIODS = ((1, N_("Dernières 24 heures")), (7, N_("7 derniers jours")), (30, N_("30 derniers jours")))
+
+
+class SummaryDialog(QDialog):
+    """Ce qui a changé sur le réseau pendant une période : quatre compteurs, puis le détail par catégorie (lecture seule du journal)."""
+
+    def __init__(self, parent=None, days=7):
+        super().__init__(parent)
+        self.setWindowTitle(tr("Résumé de la période"))
+        self.setMinimumSize(560, 520)
+        self.period = QComboBox()
+        for d, label in SUMMARY_PERIODS:
+            self.period.addItem(tr(label), d)
+        self.period.setCurrentIndex(max(0, self.period.findData(days)))
+        self.period.currentIndexChanged.connect(self.refresh)
+        self.cards = {}
+        row = QHBoxLayout(); row.setSpacing(10)
+        for kind in ("first_seen", "offline", "exposure", "exposure_fixed"):
+            box = QFrame(); box.setObjectName("card")
+            bl = QVBoxLayout(box); bl.setContentsMargins(12, 10, 12, 10); bl.setSpacing(2)
+            num = QLabel("0"); num.setObjectName("title")
+            cap = QLabel(tr(SUMMARY_TITLES[kind])); cap.setObjectName("muted"); cap.setWordWrap(True)
+            bl.addWidget(num); bl.addWidget(cap)
+            self.cards[kind] = num
+            row.addWidget(box, 1)
+        self.scans = QLabel(""); self.scans.setObjectName("muted")
+        self.tree = QTreeWidget(); self.tree.setHeaderHidden(True); self.tree.setRootIsDecorated(True)
+        self.tree.setAccessibleName(tr("Détail des changements"))
+        close = QPushButton(tr("Fermer")); close.setObjectName("primary"); close.clicked.connect(self.accept)
+        top = QHBoxLayout(); top.addWidget(QLabel(tr("Période"))); top.addWidget(self.period); top.addStretch(1)
+        lay = QVBoxLayout(self); lay.setContentsMargins(20, 20, 20, 16); lay.setSpacing(12)
+        lay.addLayout(top); lay.addLayout(row); lay.addWidget(self.scans); lay.addWidget(self.tree, 1)
+        bottom = QHBoxLayout(); bottom.addStretch(1); bottom.addWidget(close); lay.addLayout(bottom)
+        self.refresh()
+
+    def refresh(self):
+        try:
+            s = history.period_summary(self.period.currentData())
+        except (sqlite3.Error, OSError) as e:
+            self.scans.setText(tr("Historique indisponible ({e})", e=e))
+            return
+        self.scans.setText(plural(s["scans"], "scan sur la période", "scans sur la période"))
+        for kind, num in self.cards.items():
+            num.setText(str(s["devices"][kind]))
+        self.tree.clear()
+        for kind, items in s["groups"].items():
+            if not items:
+                continue
+            top = QTreeWidgetItem([f"{tr(SUMMARY_TITLES[kind])}  ({s['devices'][kind]})"])
+            f = top.font(0); f.setBold(True); top.setFont(0, f)
+            for it in items:
+                text = f"{it['name'] or '?'}  ·  {when(it['ts'])}" + (f"  ·  {it['detail']}" if it["detail"] and kind != "first_seen" else "")
+                top.addChild(QTreeWidgetItem([text]))
+            self.tree.addTopLevelItem(top)
+            top.setExpanded(kind in ("first_seen", "exposure"))
+        if not self.tree.topLevelItemCount():
+            self.tree.addTopLevelItem(QTreeWidgetItem([tr("Rien à signaler sur cette période.")]))

@@ -1,7 +1,7 @@
 """Petits widgets réutilisables : présence, tri, libellé tronqué, liste déroulante rafraîchie."""
 from PyQt6.QtCore import QPointF, QRectF, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen, QTextOption
-from PyQt6.QtWidgets import QComboBox, QFrame, QLabel, QSizePolicy, QTableWidgetItem, QTextEdit, QWidget
+from PyQt6.QtWidgets import QComboBox, QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QTableWidgetItem, QTextEdit, QWidget
 
 from ..i18n import tr
 from .theme import T
@@ -180,3 +180,37 @@ class RefreshCombo(QComboBox):
     def showPopup(self):
         self.about_to_show.emit()
         super().showPopup()
+
+
+class NewDevicesBar(QFrame):
+    """Bandeau sous la barre d'outils quand un scan trouve de nouveaux appareils : les voir, les nommer, le fermer.
+    Reste affiché jusqu'à ce qu'on le ferme ou que le scan suivant n'en trouve plus."""
+    see_clicked = pyqtSignal()
+    name_clicked = pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("banner")
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(14, 6, 8, 6)
+        lay.setSpacing(8)
+        self.text = ElidedLabel("")
+        self.see_btn = QPushButton(tr("Voir"))
+        self.name_btn = QPushButton(tr("Nommer…"))
+        self.close_btn = QPushButton("✕")
+        self.close_btn.setToolTip(tr("Masquer"))
+        self.close_btn.setAccessibleName(tr("Masquer"))
+        self.close_btn.setFixedWidth(34)
+        lay.addWidget(self.text, 1)
+        for b in (self.see_btn, self.name_btn, self.close_btn):
+            lay.addWidget(b)
+        self.see_btn.clicked.connect(self.see_clicked)
+        self.name_btn.clicked.connect(self.name_clicked)
+        self.close_btn.clicked.connect(self.hide)
+        self.hide()
+
+    def show_message(self, text, can_name):
+        self.text.setText(text)
+        self.name_btn.setVisible(can_name)
+        self.setAccessibleName(text)
+        self.show()

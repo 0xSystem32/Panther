@@ -39,7 +39,7 @@ from .settings_dialogs import AlertsDialog
 from .tables import TablesMixin
 from .theme import TEXT_SIZES, THEME_MODES
 from .util import SECURITY_INFO
-from .widgets import ElidedLabel, RefreshCombo
+from .widgets import ElidedLabel, NewDevicesBar, RefreshCombo
 
 
 class Main(QMainWindow, ScanMixin, MapMixin, TablesMixin, PanelMixin, DevicesMixin, ReportsMixin, PrefsMixin):
@@ -167,7 +167,12 @@ class Main(QMainWindow, ScanMixin, MapMixin, TablesMixin, PanelMixin, DevicesMix
 
         split = QSplitter(); split.addWidget(tabs); split.addWidget(self.side)
         split.setStretchFactor(0, 1); split.setSizes([980, 340]); split.setChildrenCollapsible(False)
-        self.setCentralWidget(split)
+        self.new_bar = NewDevicesBar()
+        self.new_bar.see_clicked.connect(self.see_new_devices); self.new_bar.name_clicked.connect(self.name_new_devices)
+        self.new_devices = []
+        center = QWidget(); cl = QVBoxLayout(center); cl.setContentsMargins(0, 0, 0, 0); cl.setSpacing(0)
+        cl.addWidget(self.new_bar); cl.addWidget(split, 1)
+        self.setCentralWidget(center)
 
         self.status = QLabel(tr("Prêt"))
         self.count = QLabel("")
@@ -207,6 +212,7 @@ class Main(QMainWindow, ScanMixin, MapMixin, TablesMixin, PanelMixin, DevicesMix
                          (tr("Exporter en JSON…"), lambda: self.export("json")), (tr("Exporter en CSV…"), lambda: self.export("csv"))):
             m.addAction(QAction(text, self, triggered=fn))
         m.addSeparator()
+        m.addAction(QAction(tr("Résumé de la période…"), self, triggered=self.open_summary))
         m.addAction(QAction(tr("Comparer deux scans…"), self, triggered=self.compare_scans))
         m.addAction(QAction(tr("Rapports planifiés…"), self, triggered=self.open_report_schedule))
         m.addAction(QAction(tr("Historique et données…"), self, triggered=self.open_data))

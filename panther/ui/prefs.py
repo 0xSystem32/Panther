@@ -100,7 +100,9 @@ class PrefsMixin:
 
     def update_netlabel(self):
         n = len(self.effective_targets())
-        self.net_btn.setText(tr("Réseaux ({n})", n=n + 1) if n else tr("Réseaux…"))
+        self.net_btn.setText(tr("Plages à scanner ({n})", n=n + 1) if n else tr("Plages à scanner…"))
+        self.net_btn.setToolTip(tr("Les réseaux scannés : le vôtre, plus vos autres VLAN ou interfaces (ajoutés tout seuls) et les plages saisies à la main.\n"
+                                   "Cliquez pour ajouter un VLAN ou un sous-réseau, ou pour configurer SNMP."))
         if self.network:
             vlan = f"  ·  VLAN {self.network['vlan']}" if self.network.get("vlan") else ""
             extra = tr("  ·  +{n} autre(s) réseau(x)", n=n) if n else ""

@@ -92,10 +92,10 @@ fabricants. `python3 tools/lab.py [--hosts 200] [--snmp]` affiche un scan comple
 - [ ] **P3 · M** Site de documentation (captures, tutoriels, cas d'usage)
 
 ## 8. Idées d'amélioration (à portée de main)
-- [ ] **P2 · M** Nommer les appareils : proposer un nom à la première apparition, surtout pour les téléphones à MAC aléatoire (aujourd'hui « device-37 »)
-- [ ] **P2 · S** Rendre le bouton « Réseaux » plus clair : « Plages à scanner », infobulle explicite, nombre masqué quand il n'apporte rien
-- [ ] **P2 · M** Résumé de la semaine sur l'accueil : appareils apparus, disparus, nouvelles expositions
-- [ ] **P2 · S** Notification **dans la fenêtre** quand un appareil inconnu apparaît (aujourd'hui : webhook ou e-mail seulement)
+- [x] Nommer les appareils : le bandeau « nouveaux appareils » propose, pour chaque appareil sans nom utile (vide, IP, « device-37 »), un nom « Type Marque » (ou le modèle) que l'on valide ou modifie ; unique parmi les appareils existants
+- [x] Bouton « Réseaux » renommé « Plages à scanner (n) » avec une infobulle qui explique ce qui est scanné et ce qui s'ajoute tout seul
+- [x] Résumé de la période (Fichier → Résumé de la période…) : compteurs et détail pour 24 h / 7 j / 30 j (arrivées, départs, retours, expositions, changements d'IP) ; la première analyse n'est pas comptée comme arrivée
+- [x] Bandeau **dans la fenêtre** quand un scan trouve de nouveaux appareils (Voir / Nommer… / fermer), en plus des notifications de bureau et alertes
 - [ ] **P3 · S** Compléter la table des modèles (Mac récents, Galaxy, Pixel) quand de vrais identifiants seront vus
 
 ## 9. Gros chantiers (à décider)

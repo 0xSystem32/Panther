@@ -195,6 +195,7 @@ class ScanMixin:
         self.devices = online + offline
         self.rebuild(animate=True); self.update_count(); self.refresh_journal(); self.refresh_security()
         self.last_new = [f"{d['hostname'] or d['ip']}  ·  {d['ip']}" for d in online if d.get("new")]
+        self.show_new_bar([d for d in online if d.get("new")] if not res["baseline"] else [])
         light = s.get("depth") in ("presence", "ecoute")
         if not light:
             self.last_full_scan = time.time()

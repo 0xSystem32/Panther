@@ -378,3 +378,39 @@ class DbSizeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PeriodSummaryTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self._path, history.PATH = history.PATH, os.path.join(self.tmp.name, "p.db")
+
+    def tearDown(self):
+        history.PATH = self._path
+        self.tmp.cleanup()
+
+    def dev(self, n, name):
+        return {"ip": f"192.168.1.{n}", "mac": f"00:1a:2b:00:00:{n:02x}", "hostname": name, "type": "phone", "vendor": "V", "network": "192.168.1.0/24",
+                "online": True, "os": "L", "ports": []}
+
+    def test_counts_and_groups_cover_only_the_period(self):
+        day = 86400
+        history.record_scan([self.dev(2, "ancien")], now=1000, networks=["192.168.1.0/24"])                      # référence (hors période)
+        history.record_scan([self.dev(2, "ancien"), self.dev(3, "recent")], now=1000 + 20 * day, networks=["192.168.1.0/24"])
+        for i in range(history.OFFLINE_AFTER):                                                                  # « ancien » disparaît
+            history.record_scan([self.dev(3, "recent")], now=1000 + (21 + i) * day, networks=["192.168.1.0/24"])
+        n = history.OFFLINE_AFTER
+        s = history.period_summary(days=7, now=1000 + (22 + n) * day)
+        self.assertEqual(s["scans"], n + 1)
+        self.assertEqual([e["name"] for e in s["groups"]["first_seen"]], ["recent"])
+        self.assertEqual([e["name"] for e in s["groups"]["offline"]], ["ancien"])
+        self.assertEqual(s["devices"]["first_seen"], 1)
+        wide = history.period_summary(days=30, now=1000 + (22 + n) * day)
+        self.assertGreaterEqual(wide["devices"]["first_seen"], 1)
+
+    def test_lists_are_bounded_but_counts_stay_exact(self):
+        history.record_scan([self.dev(250, "reference")], now=1000, networks=["192.168.1.0/24"])
+        history.record_scan([self.dev(i, f"h{i}") for i in range(2, 40)], now=2000, networks=["192.168.1.0/24"])
+        s = history.period_summary(days=1, now=2500, limit=5)
+        self.assertEqual(len(s["groups"]["first_seen"]), 5)
+        self.assertEqual(s["devices"]["first_seen"], 38)                      # la référence (1re analyse) n'est pas comptée comme arrivée

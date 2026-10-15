@@ -27,7 +27,7 @@ only the graphical interface uses PyQt6. The interface is available in **English
   type*; your path to the Internet is drawn in blue, node positions are remembered per layout. A **mini-map** appears when
   you zoom in (click or drag it to move), **Shift-drag** selects several devices (or **Ctrl-click**), and a selection can be
   trusted or tagged in one go; *View → Center on selection* (`Ctrl+Shift+0`) finds a device again.
-- **Several networks and VLANs**: networks the machine is already connected to (other interfaces, routes, VLANs) are scanned automatically; ranges typed by hand or detected (routes, 802.1Q interfaces, gateways), traceroute path,
+- **Several networks and VLANs**: networks the machine is already connected to (other interfaces, routes, VLANs) are scanned automatically, tagged VLANs through ARP (MAC, vendor, type); ranges typed by hand or detected (routes, 802.1Q interfaces, gateways), traceroute path,
   warning when a network does not answer, read-only **SNMP** (MAC addresses and switch ports of other VLANs), **LLDP/CDP**
   neighbours.
 - **IPv6 (addresses)**: the IPv6 addresses of each device (read from the kernel neighbour table after one multicast ping) are shown in the panel and exported; discovery itself is still IPv4.
@@ -45,6 +45,7 @@ only the graphical interface uses PyQt6. The interface is available in **English
 - **Alerts** (Discord / Slack / ntfy / JSON webhook, or SMTP e-mail): one grouped message per scan for a new device, a new
   exposure or a trusted device going offline; the webhook URL and the SMTP password are stored in the system keyring (or a
   private file), never in the settings.
+- **Day to day**: a banner when a scan finds new devices (*Show*, or *Name…* with a suggested name such as “Téléphone Samsung”) and *File → Period summary* (new, offline, exposures over 24 h / 7 / 30 days).
 - **Reports**: PDF (summary, map, changes, devices, exposure), Markdown (security), enriched JSON and CSV, map as PNG or SVG;
   **scheduled PDF report** (daily or weekly) in a chosen folder, with the oldest ones removed (File → “Scheduled reports…”).
 - **Vendor database**: update from the menu (IEEE), with confirmation.
@@ -181,6 +182,7 @@ misuse.
     python3 -m unittest discover -s tests -t .                       # engine (standard library only)
     QT_QPA_PLATFORM=offscreen .venv/bin/python -m unittest discover -s tests -t .   # + interface and PDF (PyQt6)
     python3 tools/i18n_check.py                                      # every text is translated
+    python3 tools/lab.py [--hosts 200] [--snmp]                      # scan a virtual network (VLANs, router, SNMP, LLDP), no root needed
     ruff check panther tests tools && mypy                           # static analysis (see CONTRIBUTING.md)
     python3 tools/update_oui.py                                      # update the vendor database (IEEE)
     QT_QPA_PLATFORM=offscreen .venv/bin/python tools/make_screenshots.py [fr|en]   # regenerate screenshots and GIF (fictional network)

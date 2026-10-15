@@ -6,10 +6,10 @@ from PyQt6.QtCore import QUrl
 from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import QMenu, QMessageBox
 
-from .. import fingerprint, history, rules, store, wol
+from .. import fingerprint, history, identity, rules, store, wol
 from ..i18n import tr
 from ..scanner import reclassify
-from .dialogs import CompareDialog, DataDialog, DuplicatesDialog, EditDialog, MergeDialog, MetaDialog, RuleFromDeviceDialog, RulesDialog
+from .dialogs import CompareDialog, DataDialog, DuplicatesDialog, EditDialog, MergeDialog, MetaDialog, RuleFromDeviceDialog, RulesDialog, SummaryDialog
 from .util import dkey
 
 
@@ -66,6 +66,9 @@ class DevicesMixin:
     def apply_retention(self, scans_days, events_days):
         history.KEEP_SCANS_DAYS, history.KEEP_EVENTS_DAYS = int(scans_days), int(events_days)
         self.settings.setValue("keep_scans_days", int(scans_days)); self.settings.setValue("keep_events_days", int(events_days))
+
+    def open_summary(self):
+        SummaryDialog(self).exec()
 
     def open_data(self):
         dlg = DataDialog(history.KEEP_SCANS_DAYS, history.KEEP_EVENTS_DAYS, self)
@@ -239,6 +242,38 @@ class DevicesMixin:
         if dlg.exec():
             name, kind = dlg.values()
             self.commit_override(dev, name, kind)
+
+    def show_new_bar(self, new):
+        """Bandeau « nouveaux appareils » (vide : le masque). Les appareils sans nom utile peuvent être nommés d'un clic."""
+        self.new_devices = list(new)
+        if not new:
+            self.new_bar.hide()
+            return
+        def label(d):
+            name = d["hostname"] or d.get("model") or d["ip"]
+            return d["ip"] if name == d["ip"] else f"{name} ({d['ip']})"
+        names = ", ".join(label(d) for d in new[:3]) + ("…" if len(new) > 3 else "")
+        text = (tr("{n} nouvel appareil : {names}", n=len(new), names=names) if len(new) == 1
+                else tr("{n} nouveaux appareils : {names}", n=len(new), names=names))
+        self.new_bar.show_message(text, any(identity.is_anonymous(d) for d in new))
+
+    def see_new_devices(self):
+        """Va sur le premier nouvel appareil, sur la carte."""
+        for d in self.new_devices:
+            n = self.nodes.get(dkey(d))
+            if n:
+                self.tabs.setCurrentIndex(0); self.scene.clearSelection(); n.setSelected(True); self.view.centerOn(n.pos())
+                return
+
+    def name_new_devices(self):
+        """Propose un nom à chaque nouvel appareil anonyme (type + fabricant), un à la fois ; « Annuler » arrête."""
+        for d in [d for d in self.new_devices if identity.is_anonymous(d)]:
+            taken = [x.get("hostname", "") for x in self.devices]
+            dlg = EditDialog(d, self, suggestion=identity.suggest_name(d, taken))
+            if not dlg.exec():
+                break
+            self.commit_override(d, *dlg.values())
+        self.show_new_bar([d for d in self.new_devices if not d.get("custom")])  # ceux qu'on vient de nommer quittent le bandeau
 
     def reset_device(self, dev):
         self.commit_override(dev, None, None)

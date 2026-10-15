@@ -140,6 +140,10 @@ QStatusBar::item {{ border: 0; }}
 QProgressBar {{ background: {T['border']}; border: 0; border-radius: 2px; max-height: 4px; min-height: 4px; }}
 QProgressBar::chunk {{ background: {T['acc']}; border-radius: 2px; }}
 QWidget#spacer {{ background: transparent; }}
+QFrame#card {{ background: {T['surface']}; border: 1px solid {T['border']}; border-radius: 8px; }}
+QFrame#card QLabel {{ background: transparent; }}
+QFrame#banner {{ background: {T['acc_bg']}; border: 0; border-bottom: 1px solid {T['border']}; }}
+QFrame#banner QLabel {{ background: transparent; color: {T['fg']}; font-weight: 600; }}
 QFrame#side, QFrame#side QScrollArea, QFrame#side QScrollArea > QWidget > QWidget {{ background: {T['panel']}; border: 0; }}
 QFrame#sep {{ background: {T['border']}; max-height: 1px; min-height: 1px; }}
 QLabel {{ background: transparent; }}
