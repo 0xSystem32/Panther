@@ -5,46 +5,32 @@ All notable changes are listed here. Format: [Keep a Changelog](https://keepacha
 
 ## [Unreleased]
 
-### Fixed
-- Networks that this machine already carries on another interface (tagged VLAN) are now scanned through ARP (MAC, vendor, type, VLAN
-  number; own address recognised) instead of being treated as routed.
-- Host probing on routed ranges tries every port at once: an empty /24 costs one timeout instead of one per port (2.5 minutes → 30 s for
-  two extra ranges in the lab).
+## [0.1.0] - 2026-10-15
 
-### Added
-- **Installer**: `installer/install.sh` (Linux), per-user, with uninstall. Panther is Linux-only; other systems get a clear message instead of a scan.
-- **Detection**: custom rules (`rules.json`), HTTP(S) title/realm, HTTPS certificate, WS-Discovery, full NetBIOS, DHCP leases,
-  readable model names.
-- **Features**: tags, notes and groups; alerts (Discord, Slack, ntfy, JSON, SMTP); scheduled PDF reports; PNG/SVG map export;
-  enriched CSV/JSON; Wake-on-LAN; vendor database update from the menu.
-- **Privacy**: listen-only mode (nothing is sent), “Erase everything”, SNMP community and alert secrets in the system keyring,
-  private data folder (mode 700/600), `SECURITY.md`.
-- **Interface**: English and French (`--lang`, View → Language), `--demo` fictional network, grouped-by-type map layout, mini-map,
-  multi-selection, system/dark/light/high-contrast themes, adjustable text size, keyboard navigation, a first-launch window that only asks for the language; deep scan and the security analysis are on by default and, like listen-only, set in the Scan menu.
-- **Quality**: `panther/gui.py` split into the `panther/ui/` package; ruff and mypy clean; fuzz, performance and packaging tests;
-  coverage gate in CI; `CONTRIBUTING.md`, pre-commit, issue templates.
-- **Day to day**: a banner under the toolbar when a scan finds new devices (Show / Name… with a suggested name built from the type and
-  vendor, e.g. “Téléphone Samsung”) — and devices without a useful name (empty, IP, “device-32”) get such a name automatically, never overriding a name you chose; *File → Period summary* (new, offline, exposures, fixed over 24 h / 7 / 30 days); the “Networks”
-  button is now “Ranges to scan” with an explanatory tooltip.
-- **Network lab**: `tools/lab.py` builds a virtual network without root (user + network namespaces: 802.1Q VLANs, a router, hosts with
-  real services, a fake SNMP switch, real LLDP/CDP frames); `tests/test_lab.py` scans it end to end (skipped where the kernel forbids it).
-- **Packaging**: man page, bash and zsh completions, release workflow (wheel + .deb attached to a GitHub release on `v*` tags).
+First release. Linux only.
 
-- **Late additions**: latency curve per device, saved scan profiles, SNMP v3 (authNoPriv), TLS certificate read from servers that demand a client certificate (set-top boxes), animated final map layout, iPhone 16 models, IPv6 addresses per device.
+### Scanning
+- Own scan engine in standard-library Python: ARP (kernel neighbour table), TCP probes, SSDP, mDNS, WS-Discovery, NetBIOS,
+  DHCP leases, HTTP(S) banners and titles, HTTPS certificates, traceroute, LLDP/CDP, read-only SNMP v2c and v3 (authNoPriv).
+- Score-based device classification with the list of clues; custom detection rules (`rules.json`); readable model names.
+- Several networks and VLANs: networks the machine is already connected to (other interfaces, routes, tagged VLANs) are scanned
+  automatically, tagged VLANs through ARP; ranges can be added by hand. Scan profiles, listen-only mode (nothing is sent).
+- Normal scan about 11 s on a small network, presence scan about 2 s; routed ranges are probed with all ports at once.
+- IPv6 addresses per device, latency curve per device.
 
-- Networks the machine is already connected to (other interfaces, routes, VLANs) are scanned automatically (option in *Networks*); new device type *Set-top box* (operator TV decoders no longer look like TVs).
+### Interface
+- Qt window (dark by default, also light, high contrast, system), English and French, star / hierarchical / grouped-by-type maps,
+  mini-map, multi-selection, keyboard navigation, adjustable text size, `--demo` fictional network.
+- Banner for new devices, automatic names for anonymous devices (never overriding a name you chose), period summary,
+  history with scan comparison, duplicate merging, tags, notes and groups, Wake-on-LAN.
+- Local web interface (127.0.0.1 only) and command line.
 
-### Changed
-- Scan discovery uses the kernel's ARP table: a normal scan goes from ~98 s to ~11 s on a small network; a presence scan takes ~2 s.
-- Device identity is the MAC address first (an IP change is an event, never a duplicate).
+### Security and privacy
+- Optional read-only exposure analysis (sensitive ports, services reachable without a password).
+- “Erase everything”, secrets in the system keyring, private data folder (700/600), see `SECURITY.md`.
+- Alerts by webhook (Discord, Slack, ntfy, JSON) or SMTP; scheduled PDF reports.
 
-### Fixed
-- The PDF report pushed the map to the second page, leaving a large blank.
-- Scanning a /31 or /32 range crashed the traceroute thread.
-- Tooltips rendered HTML found in device names, banners and certificates; they are now escaped.
-
-## [0.1.0] - 2026-10-14
-
-First version: own scan engine (ARP/TCP, SSDP, mDNS, SNMP v2c, LLDP/CDP, traceroute), PyQt6 interface with star and hierarchical
-maps, VLAN support, history, scan comparison, read-only security analysis, PDF/Markdown/CSV/JSON reports, web interface, wheel and
-.deb packages, CI.
+### Packaging and quality
+- `installer/install.sh`, `.deb`, wheel, man page, bash and zsh completions, release workflow on `v*` tags.
+- ruff and mypy clean, fuzz, performance and packaging tests, coverage gate in CI, and `tools/lab.py`: a virtual network
+  (VLANs, router, SNMP switch, LLDP/CDP frames) built without root, used by `tests/test_lab.py`.
