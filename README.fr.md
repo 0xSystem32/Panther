@@ -2,10 +2,13 @@
 
 **Français** · [English](README.md)
 
-**Scanner et cartographie de réseau local** : Panther détecte les appareils du réseau (téléphones, imprimantes, TV,
-caméras, NAS, switchs…), dessine la carte, suit leur présence dans le temps, gère plusieurs réseaux et VLAN,
-compare deux scans et exporte des rapports PDF. Le moteur de scan est **écrit à la main en Python standard**
-(pas de nmap, pas de root pour l'essentiel) ; seule l'interface graphique utilise PyQt6.
+Panther est un scanner et un cartographe de réseau local pour Linux. Il trouve les appareils d'un réseau, les classe (téléphone,
+imprimante, TV, caméra, NAS, switch…), dessine la carte, garde l'historique de leur présence et sait suivre plusieurs VLAN.
+Le moteur de scan est du Python standard écrit à la main, sans nmap et sans root pour l'essentiel ; seule l'interface utilise PyQt6.
+L'interface existe en français et en anglais.
+
+[![CI](https://github.com/0xSystem32/Panther/actions/workflows/ci.yml/badge.svg)](https://github.com/0xSystem32/Panther/actions/workflows/ci.yml)
+![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue) ![Licence MIT](https://img.shields.io/badge/licence-MIT-green)
 
 ![Démonstration : un scan qui progresse puis la carte hiérarchique](docs/img/demo.gif)
 
@@ -13,47 +16,47 @@ compare deux scans et exporte des rapports PDF. Le moteur de scan est **écrit �
 
 ## Fonctions
 
-- **Détection des appareils** : découverte ARP, SSDP/UPnP, mDNS/Bonjour, WS-Discovery (caméras ONVIF, imprimantes, PC Windows),
-  NetBIOS, titre et `realm` des pages HTTP(S), **certificat HTTPS** (marque, modèle, expiration), baux DHCP locaux ; fabricant (base IEEE), ports, bannières, système,
-  modèle lisible (« iPhone14,2 » → « iPhone 13 Pro ») ; classification **par score** avec niveau de confiance et liste des indices
+- Détection des appareils : découverte ARP, SSDP/UPnP, mDNS/Bonjour, WS-Discovery (caméras ONVIF, imprimantes, PC Windows),
+  NetBIOS, titre et `realm` des pages HTTP(S), certificat HTTPS (marque, modèle, expiration), baux DHCP locaux ; fabricant (base IEEE), ports, bannières, système,
+  modèle lisible (« iPhone14,2 » → « iPhone 13 Pro ») ; classification par score avec niveau de confiance et liste des indices
   (« pourquoi c'est une imprimante »), un logo par type (téléphone, tablette, TV, imprimante, console, enceinte,
-  caméra, NAS, switch, routeur…). Nom et type corrigeables à la main, et **règles de détection personnalisées** dans un fichier
+  caméra, NAS, switch, routeur…). Nom et type corrigeables à la main, et règles de détection personnalisées dans un fichier
   JSON (`docs/REGLES.md`) : clic droit sur un appareil → « Créer une règle de détection… ».
-- **Trois cartes** : *étoile* autour de cette machine, *hiérarchique* (Internet → box → switch → appareils) ou *regroupée par
+- Trois cartes : *étoile* autour de cette machine, *hiérarchique* (Internet → box → switch → appareils) ou *regroupée par
   type d'appareil* ; votre chemin vers Internet est tracé en bleu, les positions des nœuds sont mémorisées par disposition.
-  Une **mini-carte** apparaît quand on zoome (clic ou glisser pour se déplacer), **Maj + glisser** sélectionne plusieurs
-  appareils (ou **Ctrl + clic**) et la sélection peut être marquée de confiance ou étiquetée d'un coup ; *Affichage →
+  Une mini-carte apparaît quand on zoome (clic ou glisser pour se déplacer), Maj + glisser sélectionne plusieurs
+  appareils (ou Ctrl + clic) et la sélection peut être marquée de confiance ou étiquetée d'un coup ; *Affichage →
   Centrer sur la sélection* (`Ctrl+Maj+0`) retrouve un appareil.
-- **Plusieurs réseaux et VLAN** : les réseaux auxquels cette machine est déjà reliée (autres interfaces, routes, VLAN) sont scannés d'office (les VLAN étiquetés par ARP : MAC, fabricant, type) ; plages saisies à la main ou détectées (routes, interfaces 802.1Q, passerelles),
-  chemin traceroute, avertissement si un réseau ne répond pas, **SNMP** en lecture seule (adresses MAC et ports de
-  switch d'autres VLAN), voisins **LLDP/CDP**.
-- **IPv6 (adresses)** : les adresses IPv6 de chaque appareil (lues dans la table des voisins du noyau après un ping multicast) sont affichées dans le panneau et exportées ; la découverte reste en IPv4.
-- **Profils de scan** : plages, profondeur, interface, hôtes SNMP et options enregistrés sous un nom (Scan → Profils de scan) ; un profil ne contient jamais de secret et ne donne jamais le consentement à l'analyse de sécurité.
-- **Surveillance** : découverte par **ARP** (scan normal ≈ 10 s), scan de **présence** (≈ 2 s, presque aucun trafic) qui réutilise
+- Plusieurs réseaux et VLAN : les réseaux auxquels cette machine est déjà reliée (autres interfaces, routes, VLAN) sont scannés d'office (les VLAN étiquetés par ARP : MAC, fabricant, type) ; plages saisies à la main ou détectées (routes, interfaces 802.1Q, passerelles),
+  chemin traceroute, avertissement si un réseau ne répond pas, SNMP en lecture seule (adresses MAC et ports de
+  switch d'autres VLAN), voisins LLDP/CDP.
+- IPv6 (adresses) : les adresses IPv6 de chaque appareil (lues dans la table des voisins du noyau après un ping multicast) sont affichées dans le panneau et exportées ; la découverte reste en IPv4.
+- Profils de scan : plages, profondeur, interface, hôtes SNMP et options enregistrés sous un nom (Scan → Profils de scan) ; un profil ne contient jamais de secret et ne donne jamais le consentement à l'analyse de sécurité.
+- Surveillance : découverte par ARP (scan normal ≈ 10 s), scan de présence (≈ 2 s, presque aucun trafic) qui réutilise
   les détails du dernier scan complet, arrêt du scan, profondeur rapide / normal / approfondi, scan automatique
   (présence + un scan complet par heure), appareils *hors ligne*, *nouveaux* appareils avec notification de bureau.
-- **Historique** (SQLite) : présence sur les derniers scans, disponibilité, **courbe de latence** (le ping de chaque scan complet), journal des événements (nouvel appareil,
-  changement d'IP, hors ligne, retour…), appareils **de confiance**, **comparaison de deux scans**, **fusion de doublons**
+- Historique (SQLite) : présence sur les derniers scans, disponibilité, courbe de latence (le ping de chaque scan complet), journal des événements (nouvel appareil,
+  changement d'IP, hors ligne, retour…), appareils de confiance, comparaison de deux scans, fusion de doublons
   (une MAC « privée » qui change : suggestion automatique, alias conservés), taille et purge configurables.
-- **Analyse de sécurité optionnelle, en lecture seule** : ports sensibles, services accessibles sans mot de passe,
+- Analyse de sécurité optionnelle, en lecture seule : ports sensibles, services accessibles sans mot de passe,
   services obsolètes, avec gravité et recommandation ; nouvelles expositions et expositions corrigées dans le journal.
-- **Organisation** : étiquettes, notes et groupes par appareil (« enfants », « domotique »), filtres associés ; réveil à distance
+- Organisation : étiquettes, notes et groupes par appareil (« enfants », « domotique »), filtres associés ; réveil à distance
   (Wake-on-LAN) d'un appareil hors ligne.
-- **Alertes** (webhook Discord / Slack / ntfy / JSON, ou e-mail SMTP) : un message groupé par scan pour un nouvel appareil, une
+- Alertes (webhook Discord / Slack / ntfy / JSON, ou e-mail SMTP) : un message groupé par scan pour un nouvel appareil, une
   nouvelle exposition ou un appareil de confiance hors ligne ; l'URL du webhook et le mot de passe SMTP sont rangés dans le
   trousseau du système (ou un fichier privé), jamais dans les réglages.
-- **Au quotidien** : un bandeau quand un scan trouve de nouveaux appareils (*Voir*, ou *Nommer…*) ; les appareils sans nom utile sont nommés automatiquement (« Téléphone Samsung »), vos noms l'emportent toujours et *Fichier → Résumé de la période* (arrivées, départs, expositions sur 24 h / 7 j / 30 j).
-- **Rapports** : PDF (résumé, carte, changements, appareils, exposition), Markdown (sécurité), JSON et CSV enrichis (confiance,
-  étiquettes, historique), carte en PNG ou SVG ; **rapport PDF planifié** (tous les jours ou toutes les semaines) dans un
+- Au quotidien : un bandeau quand un scan trouve de nouveaux appareils (*Voir*, ou *Nommer…*) ; les appareils sans nom utile sont nommés automatiquement (« Téléphone Samsung »), vos noms l'emportent toujours et *Fichier → Résumé de la période* (arrivées, départs, expositions sur 24 h / 7 j / 30 j).
+- Rapports : PDF (résumé, carte, changements, appareils, exposition), Markdown (sécurité), JSON et CSV enrichis (confiance,
+  étiquettes, historique), carte en PNG ou SVG ; rapport PDF planifié (tous les jours ou toutes les semaines) dans un
   dossier choisi, avec suppression des plus anciens (menu Fichier → « Rapports planifiés… »).
-- **Base des fabricants** : mise à jour depuis le menu (IEEE), avec confirmation.
-- **Vie privée** : écoute seule (aucune sonde envoyée), menu *Tout effacer* pour l'historique, communauté SNMP dans le trousseau
+- Base des fabricants : mise à jour depuis le menu (IEEE), avec confirmation.
+- Vie privée : écoute seule (aucune sonde envoyée), menu *Tout effacer* pour l'historique, communauté SNMP dans le trousseau
   du système, dossier de données en mode 700 et base/journal en mode 600 (voir [SECURITY.md](SECURITY.md)).
-- **Accessibilité** : thème qui suit le système (ou sombre, clair, **contraste élevé** ; les tests vérifient les rapports de
-  contraste WCAG de chaque thème), **taille du texte** réglable, focus clavier visible, carte parcourable aux flèches (Entrée
+- Accessibilité : thème qui suit le système (ou sombre, clair, contraste élevé ; les tests vérifient les rapports de
+  contraste WCAG de chaque thème), taille du texte réglable, focus clavier visible, carte parcourable aux flèches (Entrée
   modifie, Échap désélectionne, `+`/`−` zoom) et onglet *Appareils* qui liste les mêmes appareils sous forme de tableau pour
   les lecteurs d'écran. La fenêtre du premier lancement ne demande que la langue ; la profondeur du scan (approfondi par défaut), l'écoute seule et l'analyse de sécurité (activée par défaut) sont dans le menu *Scan*.
-- **Interfaces** : fenêtre Qt (français ou anglais), interface web locale, ligne de commande.
+- Interfaces : fenêtre Qt (français ou anglais), interface web locale, ligne de commande.
 
 ## Captures
 
@@ -190,8 +193,7 @@ limite la taille des plages, n'écoute que sur `127.0.0.1` pour son interface we
     QT_QPA_PLATFORM=offscreen .venv/bin/python tools/make_screenshots.py [fr|en]   # régénère captures et GIF (réseau fictif)
 
 L'intégration continue ([.github/workflows/ci.yml](.github/workflows/ci.yml)) exécute les tests sur Python 3.12 et 3.13,
-les tests d'interface hors écran, puis construit le wheel et le `.deb`. Voir [CHECKLIST.md](CHECKLIST.md) pour le
-parcours du projet et [AMELIORATIONS.md](AMELIORATIONS.md) pour la suite.
+les tests d'interface hors écran, puis construit le wheel et le `.deb`. La feuille de route est dans [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Licence
 

@@ -1,8 +1,7 @@
 # Changelog
 
 All notable changes are listed here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions follow
-[Semantic Versioning](https://semver.org/). Le journal est en anglais ; les notes détaillées de développement sont dans
-[AMELIORATIONS.md](AMELIORATIONS.md) (français).
+[Semantic Versioning](https://semver.org/). The roadmap is in [docs/ROADMAP.md](docs/ROADMAP.md) (French).
 
 ## [Unreleased]
 

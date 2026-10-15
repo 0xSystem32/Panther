@@ -1,6 +1,6 @@
-# Panther – tout ce qu'il reste à faire
+# Feuille de route
 
-Liste complète, à traiter après les 8 phases de [CHECKLIST.md](CHECKLIST.md) (toutes terminées).
+État du projet et ce qui reste à faire (en français).
 Légende : `[x]` fait · `[ ]` à faire · **P1** à faire d'abord · **P2** ensuite · **P3** plus tard ·
 effort **S** (< 1 h) · **M** (quelques heures) · **L** (plus d'une journée).
 

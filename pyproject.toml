@@ -5,7 +5,8 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "panther-netscan"
 dynamic = ["version"]
-description = "Scanner et cartographie de réseau local : détection des appareils, VLAN, historique, analyse d'exposition en lecture seule"
+description = "Local network scanner and mapper: device detection, VLANs, history, read-only exposure checks"
+authors = [{ name = "0xSystem32" }]
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
@@ -20,6 +21,11 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Topic :: System :: Networking :: Monitoring",
 ]
+
+[project.urls]
+Homepage = "https://github.com/0xSystem32/Panther"
+Issues = "https://github.com/0xSystem32/Panther/issues"
+Changelog = "https://github.com/0xSystem32/Panther/blob/main/CHANGELOG.md"
 
 [project.scripts]
 panther = "panther.__main__:main"
