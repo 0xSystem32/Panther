@@ -77,6 +77,7 @@ class Main(QMainWindow, ScanMixin, MapMixin, TablesMixin, PanelMixin, DevicesMix
         self.security_consent = str(self.settings.value("security_consent", False)).lower() in ("true", "1")
         self.layout_mode = self.settings.value("layout", "etoile") if self.settings.value("layout", "etoile") in ("etoile", "hierarchique", "types") else "etoile"
         self.show_offline = str(self.settings.value("show_offline", True)).lower() in ("true", "1")
+        self.animations = str(self.settings.value("animations", True)).lower() in ("true", "1")
         mode = str(self.settings.value("theme", "auto"))
         self.theme_mode = mode if mode in THEME_MODES else "auto"
         size = str(self.settings.value("text_size", "normal"))
@@ -217,6 +218,8 @@ class Main(QMainWindow, ScanMixin, MapMixin, TablesMixin, PanelMixin, DevicesMix
         m.addAction(QAction(tr("Fusionner des doublons…"), self, triggered=self.show_duplicates))
         m.addAction(QAction(tr("Alertes (webhook, e-mail)…"), self, triggered=lambda: AlertsDialog(self).exec()))
         m.addSeparator()
+        self.profile_menu = m.addMenu(tr("Profils de scan"))
+        self.rebuild_profile_menu()
         auto = m.addMenu(tr("Scan automatique")); group = QActionGroup(self); self.auto_actions = {}
         for minutes, label in ((0, tr("Désactivé")), (5, tr("Toutes les 5 minutes")), (15, tr("Toutes les 15 minutes")),
                                (30, tr("Toutes les 30 minutes")), (60, tr("Toutes les heures"))):
@@ -227,6 +230,8 @@ class Main(QMainWindow, ScanMixin, MapMixin, TablesMixin, PanelMixin, DevicesMix
         center = QAction(tr("Centrer sur la sélection"), self, triggered=self.center_on_selection); center.setShortcut("Ctrl+Shift+0"); m.addAction(center)
         select_all = QAction(tr("Sélectionner tous les appareils"), self, triggered=self.select_all_nodes); select_all.setShortcut("Ctrl+Shift+A")
         m.addAction(select_all)
+        anim = QAction(tr("Animer la carte"), self, checkable=True, checked=self.animations, triggered=self.toggle_animations)
+        m.addAction(anim)
         mini = QAction(tr("Mini-carte"), self, checkable=True, checked=True, triggered=lambda on: (setattr(self.view, "show_minimap", on), self.view.viewport().update()))
         m.addAction(mini)
         lay = m.addMenu(tr("Disposition")); lgroup = QActionGroup(self); self.layout_actions = {}

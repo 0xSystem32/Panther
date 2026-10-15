@@ -29,6 +29,8 @@ _IPHONE = {
     "iPhone14,6": "iPhone SE (3e génération)", "iPhone14,7": "iPhone 14", "iPhone14,8": "iPhone 14 Plus",
     "iPhone15,2": "iPhone 14 Pro", "iPhone15,3": "iPhone 14 Pro Max", "iPhone15,4": "iPhone 15", "iPhone15,5": "iPhone 15 Plus",
     "iPhone16,1": "iPhone 15 Pro", "iPhone16,2": "iPhone 15 Pro Max",
+    "iPhone17,1": "iPhone 16 Pro", "iPhone17,2": "iPhone 16 Pro Max", "iPhone17,3": "iPhone 16", "iPhone17,4": "iPhone 16 Plus",
+    "iPhone17,5": "iPhone 16e",
 }
 _IPAD = {
     "iPad7,5": "iPad (6e génération)", "iPad7,6": "iPad (6e génération)", "iPad7,11": "iPad (7e génération)",

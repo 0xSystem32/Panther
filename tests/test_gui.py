@@ -10,9 +10,9 @@ HAS_QT = importlib.util.find_spec("PyQt6") is not None
 
 if HAS_QT:
     from PyQt6.QtCore import QPointF, QSettings, Qt
-    from PyQt6.QtWidgets import QApplication, QMenu, QTableWidget, QWidget
+    from PyQt6.QtWidgets import QApplication, QLabel, QMenu, QTableWidget, QWidget
 
-    from panther import alerts, gui, history, ouiupdate, reportpdf, rules, schedule, secrets, security, store, wol
+    from panther import alerts, gui, history, ouiupdate, profiles, reportpdf, rules, schedule, secrets, security, store, wol
     from panther.ui import dialogs, theme
 
 NET = "192.168.1.0/24"
@@ -56,6 +56,7 @@ class GuiTests(unittest.TestCase):
         gui.QMessageBox.question = staticmethod(lambda *a, **k: self.boxes.append(("question", a[1:3])) or gui.QMessageBox.StandardButton.Yes)
         self.w = gui.Main()
         self.w.notify = lambda *a: None
+        self.w.animations = False  # déterministe : les tests d'animation l'activent eux-mêmes
         self.w.network = {"iface": "eth0", "cidr": NET, "gateway": "192.168.1.1", "vlan": None, "kind": "ethernet"}
         self.w.networks_info = [{"cidr": NET, "kind": "local", "vlan": None}]
         self.w.show()
@@ -886,6 +887,147 @@ class GuiTests(unittest.TestCase):
         self.assertTrue(os.path.isfile(app.ICON))
         self.assertTrue(os.path.isfile(os.path.join(app.PACKAGE_DIR, "oui.txt")))
         self.assertTrue(os.path.isdir(os.path.join(app.PACKAGE_DIR, "static")))
+
+    # --- profils de scan
+    def test_save_apply_and_delete_a_profile_through_the_menu(self):
+        self.w.targets = ["192.168.20.0/24"]
+        self.w.depth.setCurrentIndex(self.w.depth.findData("rapide"))
+        self.w.save_profile("Bureau")
+        self.assertEqual([a.text() for a in self.w.profile_menu.actions() if a.text() == "Bureau"], ["Bureau"])
+        self.w.targets = []; self.w.depth.setCurrentIndex(self.w.depth.findData("approfondi"))
+        next(a for a in self.w.profile_menu.actions() if a.text() == "Bureau").trigger()
+        self.assertEqual((self.w.targets, self.w.depth.currentData()), (["192.168.20.0/24"], "rapide"))
+        self.assertIn("Bureau", self.w.status.text())
+        self.w.delete_profile("bureau")
+        self.assertEqual(self.w.load_profiles(), [])
+        self.assertFalse(any(a.text() == "Bureau" for a in self.w.profile_menu.actions()))
+
+    def test_a_profile_never_gives_the_security_consent_and_keeps_snmp_secrets_out_of_settings(self):
+        self.w.security_consent = False
+        self.w.snmp = [{"host": "192.168.1.1", "community": "SECRETE"}]
+        self.w.save_snmp(self.w.snmp, [])
+        self.w.security_on = True
+        self.w.save_profile("Audit")
+        raw = self.w.settings.value("profiles")
+        self.assertNotIn("SECRETE", raw)                                                         # seulement l'hôte, jamais la communauté
+        self.w.snmp = []; self.w.security_on = False
+        self.w.apply_profile(self.w.load_profiles()[0])
+        self.assertFalse(self.w.security_on)                                                     # pas de consentement : l'analyse n'est pas activée
+        self.assertIn("consentement", self.w.status.text())
+        self.assertEqual(self.w.snmp, [{"host": "192.168.1.1", "community": "SECRETE"}])         # la communauté revient du trousseau
+        self.w.security_consent = True
+        self.w.apply_profile(self.w.load_profiles()[0])
+        self.assertTrue(self.w.security_on)
+
+    def test_profile_with_unknown_snmp_secret_warns_and_corrupt_settings_do_not_crash(self):
+        self.w.apply_profile(profiles.make("Sans secret", snmp_hosts=["192.168.1.7"]))
+        self.assertIn("192.168.1.7", self.w.status.text())
+        for bad in ("pas du json", '{"a": 1}', '[1, "x", {"name": null}]'):
+            self.w.settings.setValue("profiles", bad)
+            self.assertEqual(self.w.load_profiles(), [])
+        self.w.settings.setValue("profiles", "[]")
+
+    def test_empty_profile_name_is_refused_with_a_message(self):
+        self.w.save_profile("   ")
+        self.assertTrue(any(b[0] == "warning" for b in self.boxes))
+        self.assertEqual(self.w.load_profiles(), [])
+
+    # --- latence dans le panneau
+    def test_panel_shows_latency_after_two_measured_scans(self):
+        d = dev("192.168.1.30", "tv", "tv")
+        for rtt in (2.0, 3.0, 5.0):
+            self.scan([dict(d, rtt=rtt)])
+        self.w.selected = gui.dkey(self.w.devices[0]); self.w.selected_keys = [self.w.selected]
+        self.w.refresh_panel(); self.app.processEvents()
+        from panther.ui.widgets import LatencyChart
+        self.assertEqual(len(self.w.findChildren(LatencyChart)), 1)
+        texts = " ".join(lab.text() for lab in self.w.findChildren(QLabel))
+        self.assertIn("moy. 3.3", texts)
+
+    # --- animation de la carte
+    def wait_animation(self):
+        end = time.time() + 3
+        while getattr(self.w, "_anim", None) is not None and self.w._anim.state() == self.w._anim.State.Running and time.time() < end:
+            self.app.processEvents(); time.sleep(0.01)
+        self.app.processEvents()
+
+    def test_final_rebuild_slides_nodes_to_their_place_instead_of_jumping(self):
+        self.scan(self.map_devices(6))
+        key = next(k for k, n in self.w.nodes.items() if not n.dev["is_self"])
+        final = self.w.nodes[key].pos()
+        self.w.nodes[key].setPos(final.x() + 300, final.y() - 200)                       # le nœud est « ailleurs » avant le recalcul
+        self.w.animations = True
+        self.w.rebuild(animate=True)
+        node = self.w.nodes[key]
+        self.assertGreater((node.pos() - final).manhattanLength(), 100)                  # il part de l'ancienne position
+        self.wait_animation()
+        self.assertLess((self.w.nodes[key].pos() - final).manhattanLength(), 0.5)        # et arrive exactement à la place calculée
+
+    def test_animation_can_be_switched_off_and_never_touches_unmoved_nodes(self):
+        self.scan(self.map_devices(4))
+        before = {k: (n.pos().x(), n.pos().y()) for k, n in self.w.nodes.items()}
+        self.w.animations = True
+        self.w.rebuild(animate=True)
+        self.assertIsNone(getattr(self.w, "_anim", None))                                # rien n'a bougé : pas d'animation
+        self.assertEqual({k: (n.pos().x(), n.pos().y()) for k, n in self.w.nodes.items()}, before)
+        k = next(iter(self.w.nodes)); self.w.nodes[k].setPos(900, 900)
+        self.w.toggle_animations(False)
+        self.assertEqual(str(self.w.settings.value("animations")).lower(), "false")
+        self.w.rebuild(animate=True)
+        self.assertNotEqual((self.w.nodes[k].pos().x(), self.w.nodes[k].pos().y()), (900, 900))   # sans animation : place définitive tout de suite
+
+    def test_a_rebuild_during_an_animation_does_not_crash(self):
+        self.scan(self.map_devices(8))
+        for n in self.w.nodes.values():
+            n.setPos(n.pos().x() + 200, n.pos().y())
+        self.w.animations = True
+        self.w.rebuild(animate=True)
+        self.w.rebuild()                                                                 # la scène est vidée en pleine animation
+        self.w.rebuild(animate=True)
+        self.wait_animation()
+        self.assertEqual(len(self.w.nodes), len(self.w.devices))
+
+    # --- SNMP v3
+    def test_snmp_v3_source_is_validated_in_the_dialog_and_saved_without_its_password_in_settings(self):
+        dlg = gui.NetworksDialog("192.168.1.0/24", [], [], self.w)
+        dlg.snmp_host.setText("192.168.1.2")
+        dlg.snmp_ver.setCurrentIndex(dlg.snmp_ver.findData("v3"))
+        self.assertFalse(dlg.snmp_v3_row.isHidden())
+        dlg.snmp_comm.setText("lecteur"); dlg.snmp_pass.setText("court")
+        dlg.add_snmp()
+        self.assertEqual(dlg.snmp_sources(), [])                                                 # mot de passe trop court : refusé
+        self.assertIn("8 caractères", dlg.msg.text())
+        dlg.snmp_comm.setText("lecteur"); dlg.snmp_pass.setText("motdepasse-long"); dlg.snmp_proto.setCurrentIndex(dlg.snmp_proto.findData("sha256"))
+        dlg.add_snmp()
+        src = dlg.snmp_sources()[0]
+        self.assertEqual((src["host"], src["user"], src["auth_proto"]), ("192.168.1.2", "lecteur", "sha256"))
+        self.assertIn("v3 lecteur (SHA-256)", dlg.snmp_list.item(0).text())
+        self.assertNotIn("motdepasse", dlg.snmp_list.item(0).text())
+        self.w.save_snmp([src], [])
+        raw = self.w.settings.value("snmp")
+        self.assertNotIn("motdepasse", raw)                                                      # le mot de passe est dans le trousseau
+        self.assertEqual(self.w.load_snmp(), [src])
+        self.w.save_snmp([{"host": "192.168.1.2", "community": "public-ro"}], [src])             # repasse en v2c : l'ancien secret v3 disparaît
+        self.assertIsNone(secrets.get(gui.snmp_v3_secret("192.168.1.2")) if hasattr(gui, "snmp_v3_secret") else secrets.get("snmp-v3-password:192.168.1.2"))
+        self.assertEqual(self.w.load_snmp(), [{"host": "192.168.1.2", "community": "public-ro"}])
+
+    def test_v2c_form_is_unchanged_and_version_switch_updates_the_fields(self):
+        dlg = gui.NetworksDialog("192.168.1.0/24", [], [], self.w)
+        self.assertTrue(dlg.snmp_v3_row.isHidden())
+        dlg.snmp_ver.setCurrentIndex(1); self.assertEqual(dlg.snmp_comm.placeholderText(), "Utilisateur")
+        dlg.snmp_ver.setCurrentIndex(0); self.assertEqual(dlg.snmp_comm.placeholderText(), "Communauté (lecture)")
+        dlg.snmp_host.setText("192.168.1.1"); dlg.snmp_comm.setText("public")
+        dlg.add_snmp()
+        self.assertEqual(dlg.snmp_sources(), [{"host": "192.168.1.1", "community": "public"}])
+
+    def test_a_profile_restores_a_v3_source_from_the_keyring(self):
+        src = {"host": "192.168.1.2", "user": "lecteur", "auth_proto": "sha1", "auth_password": "motdepasse-long"}
+        self.w.snmp = [src]; self.w.save_snmp([src], [])
+        self.w.save_profile("Switch")
+        self.w.snmp = []
+        self.w.apply_profile(self.w.load_profiles()[0])
+        self.assertEqual(self.w.snmp, [src])
+        self.assertNotIn("SNMP inconnue", self.w.status.text())
 
     # --- anglais
     FRENCH = __import__("re").compile(r"[àâçéèêëîïôùûüœ]|\b(appareils?|réseaux?|lancez|aucun[e]?|erreur|impossible|enregistr\w+|choisissez|dossier|fichier|"

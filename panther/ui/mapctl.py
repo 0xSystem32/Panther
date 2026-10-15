@@ -4,7 +4,7 @@ import os
 import sqlite3
 import time
 
-from PyQt6.QtCore import QPointF, QRectF, QSize, Qt
+from PyQt6.QtCore import QEasingCurve, QPointF, QRectF, QSize, Qt, QVariantAnimation
 from PyQt6.QtGui import QColor, QImage, QPainter
 from PyQt6.QtWidgets import QFileDialog, QMessageBox
 
@@ -99,8 +99,38 @@ class MapMixin:
         except (sqlite3.Error, OSError):
             log.debug("Position non mémorisée", exc_info=True)  # confort seulement : on ne gêne pas l'utilisateur
 
-    def rebuild(self):
+    def stop_animation(self):
+        anim = getattr(self, "_anim", None)
+        if anim is not None:
+            anim.stop()
+            self._anim = None
+
+    def animate_nodes(self, start, duration=380):
+        """Les nœuds partent de `start` ({clé: position}) et glissent vers leur place définitive, au lieu d'y sauter d'un coup."""
+        moves = []
+        for k, n in self.nodes.items():
+            a = start.get(k)
+            if a is not None and (a - n.pos()).manhattanLength() > 2:
+                moves.append((n, a, QPointF(n.pos())))
+                n.setPos(a)
+        if not moves:
+            return
+        anim = QVariantAnimation(self)
+        anim.setDuration(duration); anim.setStartValue(0.0); anim.setEndValue(1.0)
+        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+        def step(t):
+            for n, a, b in moves:
+                n.setPos(a + (b - a) * float(t))
+        anim.valueChanged.connect(step)
+        anim.finished.connect(lambda: [n.setPos(b) for n, _a, b in moves])  # position exacte à la fin
+        self._anim = anim
+        anim.start()
+
+    def rebuild(self, animate=False):
         self._last_rebuild = time.time()
+        self.stop_animation()
+        before = {k: QPointF(n.pos()) for k, n in self.nodes.items()} if (animate and getattr(self, "animations", False)) else {}
         self._building = True
         self.scene.clear(); self.nodes = {}
         try:
@@ -121,6 +151,8 @@ class MapMixin:
         if self.selected in self.nodes:
             self.nodes[self.selected].setSelected(True)
         self.fill_table(); self.apply_filter()
+        if before:
+            self.animate_nodes(before)
         if len(self.devices) <= 2:
             self.fit()
         self.view.viewport().update()

@@ -18,7 +18,7 @@ OFFLINE_DAYS = 14        # au-delà, un appareil absent n'est plus affiché
 OFFLINE_AFTER = 2        # nombre de scans manqués avant de le déclarer hors ligne (évite les faux « hors ligne »)
 KEEP_SCANS_DAYS = 90     # durée de conservation de la présence détaillée
 KEEP_EVENTS_DAYS = 365
-VERSION = 6
+VERSION = 7
 KEEP_SNAPSHOTS = True
 
 _BASE = """CREATE TABLE IF NOT EXISTS devices(
@@ -57,6 +57,9 @@ def _migrate(con):
     if v < 6:  # étiquettes, notes et groupe choisis par l'utilisateur
         con.execute("CREATE TABLE IF NOT EXISTS device_meta(key TEXT PRIMARY KEY, note TEXT NOT NULL DEFAULT '', "
                     "tags TEXT NOT NULL DEFAULT '', grp TEXT NOT NULL DEFAULT '')")
+    if v < 7:  # latence mesurée (ping) à chaque scan complet
+        if "rtt" not in [r[1] for r in con.execute("PRAGMA table_info(seen)")]:
+            con.execute("ALTER TABLE seen ADD COLUMN rtt REAL")
     con.execute(f"PRAGMA user_version={VERSION}")
 
 
@@ -154,7 +157,9 @@ def record_scan(devices, now=None, networks=None, depth="normal"):
                     n_events += 1
                 con.execute("UPDATE devices SET ip=?, mac=COALESCE(NULLIF(?, ''), mac), name=?, type=?, vendor=?, network=?, "
                             "last_seen=?, online=1, misses=0 WHERE key=?", vals + (key,))
-            con.execute("INSERT INTO seen(scan_id, key, ip) VALUES(?,?,?)", (scan_id, key, d["ip"]))
+            rtt = d.get("rtt")
+            con.execute("INSERT INTO seen(scan_id, key, ip, rtt) VALUES(?,?,?,?)",
+                        (scan_id, key, d["ip"], float(rtt) if isinstance(rtt, (int, float)) and 0 <= rtt < 60000 else None))
         if networks:  # appareils connus de ces plages mais absents de ce scan
             marks = ",".join("?" * len(networks))
             for r in con.execute(f"SELECT key, ip, name, online, misses FROM devices WHERE network IN ({marks})",
@@ -540,6 +545,31 @@ def recent_events(limit=300, key=None):
         return [dict(r) for r in con.execute(q + " ORDER BY ts DESC, id DESC LIMIT ?", (*args, limit))]
     finally:
         con.close()
+
+
+def latency_series(dev, last=60):
+    """Latence de l'appareil à chacun de ses derniers scans de son réseau : [(horodatage, ms ou None, présent)], du plus ancien au plus récent.
+    `ms` est None quand il n'y a pas de mesure (scan de présence, ou appareil absent) ; `présent` dit s'il a répondu à ce scan."""
+    key = _key(dev)
+    con = _connect()
+    try:
+        net = dev.get("network", "")
+        rows = con.execute("SELECT id, ts, networks FROM scans ORDER BY id DESC LIMIT ?", (last * 4,)).fetchall()
+        scans = [s for s in rows if not net or not s["networks"] or net in s["networks"].split(",")][:last]
+        got = {r["scan_id"]: r["rtt"] for r in con.execute("SELECT scan_id, rtt FROM seen WHERE key=?", (key,))}
+        return [(s["ts"], got.get(s["id"]), s["id"] in got) for s in reversed(scans)]
+    finally:
+        con.close()
+
+
+def latency_summary(series):
+    """Statistiques d'une série de `latency_series` : {n, min, avg, max, last, missed} (ms ; `missed` = scans où l'appareil n'a pas répondu).
+    None s'il n'y a aucune mesure."""
+    vals = [ms for _ts, ms, _present in series if ms is not None]
+    if not vals:
+        return None
+    return {"n": len(vals), "min": min(vals), "avg": sum(vals) / len(vals), "max": max(vals), "last": vals[-1],
+            "missed": sum(1 for _ts, _ms, present in series if not present)}
 
 
 def device_summary(dev, last=48, now=None):

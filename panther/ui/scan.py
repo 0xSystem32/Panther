@@ -7,9 +7,9 @@ import time
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QIcon
-from PyQt6.QtWidgets import QSystemTrayIcon
+from PyQt6.QtWidgets import QInputDialog, QMessageBox, QSystemTrayIcon
 
-from .. import alerts, history, identity, networks, security, store
+from .. import alerts, history, identity, networks, profiles, security, store
 from ..i18n import plural, tr
 from .icons import type_pixmap
 from .settings_dialogs import AlertWorker
@@ -31,6 +31,80 @@ class ScanMixin:
             self.status.setText(tr("Arrêt en cours…")); self.btn.setEnabled(False); self.act_stop.setEnabled(False)
 
     FULL_SCAN_EVERY = 3600  # secondes : au plus un scan complet par heure pendant les scans automatiques
+
+    # ---- profils de scan enregistrés (plages, profondeur, interface, hôtes SNMP, options)
+    def load_profiles(self):
+        import json
+        try:
+            return profiles.clean(json.loads(self.settings.value("profiles", "[]")))
+        except (ValueError, TypeError):
+            return []
+
+    def store_profiles(self, plist):
+        import json
+        self.settings.setValue("profiles", json.dumps(plist))
+
+    def rebuild_profile_menu(self):
+        m = self.profile_menu
+        m.clear()
+        plist = self.load_profiles()
+        for p in plist:
+            m.addAction(p["name"], lambda p=p: self.apply_profile(p))
+        if plist:
+            m.addSeparator()
+        m.addAction(tr("Enregistrer la configuration actuelle…"), self.save_profile)
+        rm = m.addMenu(tr("Supprimer un profil"))
+        rm.setEnabled(bool(plist))
+        for p in plist:
+            rm.addAction(p["name"], lambda n=p["name"]: self.delete_profile(n))
+
+    def current_profile(self, name):
+        return profiles.make(name, self.targets, self.depth.currentData(), self.iface_combo.currentData() or "", [s["host"] for s in self.snmp],
+                             self.security_on, self.passive_on)
+
+    def save_profile(self, name=None):
+        if name is None:
+            name, ok = QInputDialog.getText(self, tr("Profil de scan"), tr("Nom du profil :"))
+            if not ok:
+                return
+        try:
+            prof = self.current_profile(name)
+            self.store_profiles(profiles.upsert(self.load_profiles(), prof))
+        except ValueError as e:
+            QMessageBox.warning(self, tr("Panther"), tr("Impossible d'enregistrer le profil : {e}", e=e)); return
+        self.rebuild_profile_menu()
+        self.status.setText(tr("Profil « {name} » enregistré", name=prof["name"]))
+
+    def delete_profile(self, name):
+        self.store_profiles(profiles.remove(self.load_profiles(), name))
+        self.rebuild_profile_menu()
+        self.status.setText(tr("Profil « {name} » supprimé", name=name))
+
+    def apply_profile(self, p):
+        """Applique un profil : plages, profondeur, interface, hôtes SNMP (communauté relue dans le trousseau) et options. Le consentement
+        à l'analyse de sécurité n'est jamais donné par un profil : sans lui, l'option est ignorée."""
+        self.targets = list(p["targets"])
+        self.settings.setValue("targets", __import__("json").dumps(self.targets))
+        self.depth.setCurrentIndex(max(self.depth.findData(p["depth"]), 0))
+        i = self.iface_combo.findData(p["iface"] or None)
+        if i >= 0:
+            self.iface_combo.setCurrentIndex(i)
+        previous = self.snmp
+        known = {s["host"]: s for s in self.load_snmp()}  # communauté ou utilisateur v3 déjà enregistrés pour cet hôte (secrets du trousseau)
+        self.snmp = [known.get(h) or {"host": h, "community": ""} for h in p["snmp"]]
+        self.save_snmp(self.snmp, previous)
+        missing = [s["host"] for s in self.snmp if not (s.get("auth_password") if s.get("user") else s.get("community"))]
+        self.act_passive.setChecked(p["passive"]); self.toggle_passive(p["passive"])
+        want_security = p["security"] and not p["passive"] and self.security_consent
+        self.security_on = want_security
+        self.act_security.setChecked(want_security); self.settings.setValue("security", want_security)
+        self.update_netlabel(); self.refresh_security()
+        note = []
+        if p["security"] and not want_security and not p["passive"]:
+            note.append(tr("analyse de sécurité non activée (consentement à donner dans le menu Sécurité)"))
+        if missing:
+            note.append(tr("communauté SNMP inconnue pour {hosts}", hosts=", ".join(missing)))
+        self.status.setText(tr("Profil « {name} » appliqué : relancez le scan", name=p["name"]) + ("  ·  " + " ; ".join(note) if note else ""))
 
     def choose_depth(self, auto=False, now=None):
         """Profondeur réellement utilisée et appareils connus. Le scan de présence réutilise les détails du dernier
@@ -112,7 +186,7 @@ class ScanMixin:
             log.warning(tr("Historique indisponible"), exc_info=True)
             note = tr("  ·  historique indisponible ({e})", e=e)
         self.devices = online + offline
-        self.rebuild(); self.update_count(); self.refresh_journal(); self.refresh_security()
+        self.rebuild(animate=True); self.update_count(); self.refresh_journal(); self.refresh_security()
         self.last_new = [f"{d['hostname'] or d['ip']}  ·  {d['ip']}" for d in online if d.get("new")]
         light = s.get("depth") in ("presence", "ecoute")
         if not light:

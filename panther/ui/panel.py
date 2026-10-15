@@ -11,7 +11,7 @@ from .dialogs import MetaDialog
 from .icons import type_pixmap
 from .theme import sev_color
 from .util import EVENT_LABELS, LABELS, tip, when, when_short
-from .widgets import PresenceBar
+from .widgets import LatencyChart, PresenceBar
 
 
 class PanelMixin:
@@ -171,6 +171,16 @@ class PanelMixin:
                 if h["presence"]:
                     k = QLabel(tr("Présence")); k.setObjectName("key")
                     self.form.addRow(k, PresenceBar(h["presence"]))
+                try:
+                    series = history.latency_series(d)
+                except (sqlite3.Error, OSError):
+                    series = []
+                stats = history.latency_summary(series)
+                if stats and stats["n"] >= 2:
+                    k = QLabel(tr("Latence")); k.setObjectName("key")
+                    self.form.addRow(k, LatencyChart(series))
+                    self.add_row(tr("Latence (ms)"), tr("moy. {avg} · min {low} · max {high} · {missed} sans réponse", avg=f"{stats['avg']:.1f}",
+                                                       low=f"{stats['min']:.1f}", high=f"{stats['max']:.1f}", missed=stats["missed"]))
                 if h["uptime7"] is not None:
                     self.add_row(tr("Disponibilité"), tr("{uptime} % sur 7 jours", uptime=h['uptime7']))
                 if h["events"]:

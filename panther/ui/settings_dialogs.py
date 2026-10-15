@@ -19,9 +19,10 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QSpinBox,
     QVBoxLayout,
+    QWidget,
 )
 
-from .. import alerts, networks, ouiupdate, schedule, secrets, security
+from .. import alerts, networks, ouiupdate, schedule, secrets, security, snmpv3
 from ..i18n import N_, tr
 from .util import log, when
 
@@ -276,24 +277,44 @@ class NetworksDialog(QDialog):
         self.snmp_host = QLineEdit(); self.snmp_host.setPlaceholderText(tr("IP du routeur / switch"))
         self.snmp_comm = QLineEdit(); self.snmp_comm.setPlaceholderText(tr("Communauté (lecture)"))
         self.snmp_comm.setEchoMode(QLineEdit.EchoMode.Password)
+        self.snmp_ver = QComboBox(); self.snmp_ver.addItem("v2c", "v2c"); self.snmp_ver.addItem(tr("v3 (authentification)"), "v3")
+        self.snmp_ver.setToolTip(tr("v3 : utilisateur et mot de passe (HMAC SHA ou MD5), sans chiffrement : les réponses circulent en clair."))
+        self.snmp_pass = QLineEdit(); self.snmp_pass.setPlaceholderText(tr("Mot de passe (8 caractères au moins)"))
+        self.snmp_pass.setEchoMode(QLineEdit.EchoMode.Password)
+        self.snmp_proto = QComboBox()
+        for key, label in (("sha1", "SHA-1"), ("sha256", "SHA-256"), ("md5", "MD5")):
+            self.snmp_proto.addItem(label, key)
+        self.snmp_ver.currentIndexChanged.connect(self.on_snmp_version)
         snmp_add = QPushButton(tr("Ajouter")); snmp_add.clicked.connect(self.add_snmp)
         snmp_del = QPushButton(tr("Retirer")); snmp_del.clicked.connect(self.remove_snmp)
-        srow = QHBoxLayout(); srow.addWidget(self.snmp_host, 1); srow.addWidget(self.snmp_comm, 1); srow.addWidget(snmp_add); srow.addWidget(snmp_del)
+        srow = QHBoxLayout(); srow.addWidget(self.snmp_host, 1); srow.addWidget(self.snmp_ver); srow.addWidget(self.snmp_comm, 1); srow.addWidget(snmp_add); srow.addWidget(snmp_del)
+        srow3 = QHBoxLayout(); srow3.addWidget(self.snmp_pass, 1); srow3.addWidget(self.snmp_proto)
+        self.snmp_v3_row = QWidget(); self.snmp_v3_row.setLayout(srow3); srow3.setContentsMargins(0, 0, 0, 0)
+        self.snmp_v3_row.setVisible(False)
         self.snmp_list = QListWidget(); self.snmp_list.setMaximumHeight(84)
         self.sources = []
         for src in snmp_sources:
             self._add_snmp_item(src)
         for w in (snmp_title, snmp_note):
             lay.addWidget(w)
-        lay.addLayout(srow); lay.addWidget(self.snmp_list); lay.addWidget(buttons)
+        lay.addLayout(srow); lay.addWidget(self.snmp_v3_row); lay.addWidget(self.snmp_list); lay.addWidget(buttons)
         for n in networks.known_networks(local_cidr):
             self.add_item(n, n["cidr"] in selected)
         for c in selected:
             self.add_item({"cidr": c, "kind": "manuel"}, True)
 
+    def on_snmp_version(self):
+        v3 = self.snmp_ver.currentData() == "v3"
+        self.snmp_v3_row.setVisible(v3)
+        self.snmp_comm.setEchoMode(QLineEdit.EchoMode.Normal if v3 else QLineEdit.EchoMode.Password)
+        self.snmp_comm.setPlaceholderText(tr("Utilisateur") if v3 else tr("Communauté (lecture)"))
+
     def _add_snmp_item(self, src):
         self.sources.append(src)
-        self.snmp_list.addItem(tr("{host}  ·  communauté {dots}", host=src['host'], dots='•' * min(len(src['community']), 8)))
+        if src.get("user"):
+            self.snmp_list.addItem(tr("{host}  ·  v3 {user} ({proto})", host=src['host'], user=src['user'], proto={"sha1": "SHA-1", "sha256": "SHA-256", "md5": "MD5"}.get(src.get("auth_proto", "sha1"), "?")))
+        else:
+            self.snmp_list.addItem(tr("{host}  ·  communauté {dots}", host=src['host'], dots='•' * min(len(src['community']), 8)))
 
     def add_snmp(self):
         host, comm = self.snmp_host.text().strip(), self.snmp_comm.text().strip()
@@ -302,9 +323,17 @@ class NetworksDialog(QDialog):
                 raise ValueError(tr("Seules les adresses privées sont acceptées."))
         except ValueError as e:
             self.msg.setText(str(e) if tr("Seules les adresses privées sont acceptées.") in str(e) else tr("« {host} » n'est pas une adresse IP valide.", host=host)); return
-        if not comm:
-            self.msg.setText(tr("Indiquez la communauté SNMP en lecture seule.")); return
-        self._add_snmp_item({"host": host, "community": comm})
+        if self.snmp_ver.currentData() == "v3":
+            try:
+                snmpv3.V3User(comm, self.snmp_pass.text(), self.snmp_proto.currentData())  # valide l'utilisateur et le mot de passe
+            except ValueError:
+                self.msg.setText(tr("SNMP v3 : indiquez un utilisateur et un mot de passe de 8 caractères au moins.")); return
+            self._add_snmp_item({"host": host, "user": comm, "auth_proto": self.snmp_proto.currentData(), "auth_password": self.snmp_pass.text()})
+            self.snmp_pass.clear()
+        else:
+            if not comm:
+                self.msg.setText(tr("Indiquez la communauté SNMP en lecture seule.")); return
+            self._add_snmp_item({"host": host, "community": comm})
         self.snmp_host.clear(); self.snmp_comm.clear(); self.msg.setText("")
 
     def remove_snmp(self):

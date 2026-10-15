@@ -164,7 +164,7 @@ MDNS_HINTS = {"_ipp._tcp": ("printer", 50), "_ipps._tcp": ("printer", 50), "_pri
 MODEL_PATTERNS = [
     (r"iphone", "phone", 70), (r"ipad|galaxy tab|kindle|tablet|surface go", "tablet", 70),
     (r"macbook", "laptop", 70), (r"imac|mac ?mini|mac ?pro|mac studio", "desktop", 70),
-    (r"apple ?tv|appletv", "tv", 70), (r"homepod|audioaccessory", "speaker", 70),
+    (r"apple ?tv|appletv", "tv", 70), (r"\bstb|set-?top|d[ée]codeur", "tv", 40), (r"homepod|audioaccessory", "speaker", 70),
     (r"chromecast|google tv", "tv", 70), (r"nest (audio|mini|hub)|google home", "speaker", 65),
     (r"bravia|smart ?tv|webos|tizen|roku|fire ?tv|android ?tv|shield|tv\b|televis|vewd|hbbtv|netcast|vidaa|opera tv", "tv", 60),
     (r"playstation|ps[345]\b|xbox|nintendo", "console", 70),

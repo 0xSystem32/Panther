@@ -8,7 +8,7 @@ from ..i18n import tr
 from ..scanner import local_network
 from .settings_dialogs import NetworksDialog, OuiWorker
 from .theme import THEME_MODES, THEMES, T, make_style, resolve_theme, set_text_scale, text_scale_of
-from .util import log, snmp_secret
+from .util import log, snmp_secret, snmp_v3_secret
 from .wizard import WelcomeWizard, apply_welcome_settings
 
 
@@ -70,6 +70,13 @@ class PrefsMixin:
             QMessageBox.information(self, tr("Langue"), tr("La langue sera appliquée au prochain démarrage de Panther."))
 
     # ---------- divers ----------
+    def toggle_animations(self, on):
+        """Animation de la carte (les nœuds glissent à leur place à la fin d'un scan). À couper si le mouvement gêne."""
+        self.animations = bool(on)
+        self.settings.setValue("animations", self.animations)
+        if not on:
+            self.stop_animation()
+
     def set_theme_mode(self, mode, save=True):
         """Thème : automatique (suit le système), sombre, clair ou contraste élevé."""
         self.theme_mode = mode if mode in THEME_MODES else "auto"
@@ -117,11 +124,16 @@ class PrefsMixin:
         Une ancienne configuration (communauté en clair) est migrée vers le trousseau puis effacée des réglages."""
         try:
             raw = json.loads(self.settings.value("snmp", "[]"))
-            items = [(str(x["host"]), x.get("community")) for x in raw if isinstance(x, dict)]
+            items = [x for x in raw if isinstance(x, dict) and "host" in x]
         except (ValueError, TypeError, KeyError, AttributeError):
             return []
         sources, legacy = [], False
-        for host, comm in items:
+        for x in items:
+            host, comm = str(x["host"]), x.get("community")
+            if x.get("user"):  # SNMP v3 : l'utilisateur et l'algorithme sont dans les réglages, le mot de passe dans le trousseau
+                sources.append({"host": host, "user": str(x["user"]), "auth_proto": str(x.get("proto") or "sha1"),
+                                "auth_password": secrets.get(snmp_v3_secret(host)) or ""})
+                continue
             if comm is not None:
                 legacy = True
                 secrets.set(snmp_secret(host), str(comm))
@@ -134,10 +146,18 @@ class PrefsMixin:
     def save_snmp(self, sources, previous):
         """Enregistre les hôtes (réglages) et les communautés (trousseau) ; oublie celles des hôtes retirés."""
         for host in {s["host"] for s in previous} - {s["host"] for s in sources}:
-            secrets.delete(snmp_secret(host))
+            secrets.delete(snmp_secret(host)); secrets.delete(snmp_v3_secret(host))
+        entries = []
         for s in sources:
-            secrets.set(snmp_secret(s["host"]), s["community"])
-        self.settings.setValue("snmp", json.dumps([{"host": s["host"]} for s in sources]))
+            if s.get("user"):
+                secrets.set(snmp_v3_secret(s["host"]), s.get("auth_password", ""))
+                secrets.delete(snmp_secret(s["host"]))
+                entries.append({"host": s["host"], "user": s["user"], "proto": s.get("auth_proto", "sha1")})
+            else:
+                secrets.set(snmp_secret(s["host"]), s.get("community", ""))
+                secrets.delete(snmp_v3_secret(s["host"]))
+                entries.append({"host": s["host"]})
+        self.settings.setValue("snmp", json.dumps(entries))
 
     def open_networks(self):
         try:

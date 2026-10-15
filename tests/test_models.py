@@ -92,3 +92,13 @@ class ModelNameTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class IPhone16Tests(unittest.TestCase):
+    def test_iphone_16_family(self):
+        expected = {"iPhone17,1": "iPhone 16 Pro", "iPhone17,2": "iPhone 16 Pro Max", "iPhone17,3": "iPhone 16", "iPhone17,4": "iPhone 16 Plus",
+                    "iPhone17,5": "iPhone 16e"}
+        for ident, name in expected.items():
+            f = models.friendly(ident)
+            self.assertEqual((f["name"], f["type"], f["source"]), (name, "phone", "table"), ident)
+        self.assertEqual(models.friendly("iPhone17,9")["source"], "famille")           # un identifiant futur retombe sur la famille, jamais un nom deviné

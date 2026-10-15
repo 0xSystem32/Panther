@@ -17,7 +17,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
-from . import certs, dhcp, discovery, fingerprint, models, networks, security, snmp, store, topology
+from . import certs, dhcp, discovery, fingerprint, models, networks, security, snmp, snmpv3, store, topology
 from .i18n import tr
 
 log = logging.getLogger("panther.scanner")
@@ -182,10 +182,19 @@ def scan_ports(ip, ports, timeout):
     return [p for p, ok in zip(ports, res) if ok]
 
 
+_rtt_cache: dict = {}  # ip -> latence (ms) lue par ping_ttl ; consommée par _inspect (même schéma que _nb_info)
+_rtt_lock = threading.Lock()
+
+
 def ping_ttl(ip):
+    """TTL de la réponse à un ping ; la latence (ms) du même ping est gardée pour `_inspect` (aucune sonde de plus)."""
     try:
         out = subprocess.run(["ping", "-c1", "-W1", ip], capture_output=True,
                              text=True, timeout=3).stdout
+        t = re.search(r"time[=<]([\d.]+)\s*ms", out, re.I)
+        if t:
+            with _rtt_lock:
+                _rtt_cache[ip] = float(t.group(1))
         m = re.search(r"ttl=(\d+)", out, re.I)
         return int(m.group(1)) if m else None
     except Exception:
@@ -302,6 +311,65 @@ def http_summary(head, body):
     return " | ".join(p for p in parts if p)
 
 
+def tls_certificate_in(stream):
+    """Premier certificat (DER) d'un message Certificate TLS ≤ 1.2 contenu dans `stream` (octets reçus du serveur), ou None s'il n'est pas
+    (encore) complet. Analyse bornée : les octets viennent d'un appareil non fiable."""
+    hs, o = b"", 0
+    while o + 5 <= len(stream) and len(hs) < 65536:        # enregistrements : type, version, longueur
+        rtype, rlen = stream[o], int.from_bytes(stream[o + 3:o + 5], "big")
+        if o + 5 + rlen > len(stream):
+            break
+        if rtype == 22:                                    # handshake
+            hs += stream[o + 5:o + 5 + rlen]
+        o += 5 + rlen
+    p = 0
+    while p + 4 <= len(hs):
+        mtype, mlen = hs[p], int.from_bytes(hs[p + 1:p + 4], "big")
+        body = hs[p + 4:p + 4 + mlen]
+        if mtype == 11 and len(body) == mlen and len(body) >= 6:
+            clen = int.from_bytes(body[3:6], "big")
+            return bytes(body[6:6 + clen]) if 0 < clen <= len(body) - 6 else None
+        p += 4 + mlen
+    return None
+
+
+def peek_certificate(ip, port, timeout=1.5):
+    """Certificat présenté par un serveur TLS, lu dans sa première réponse SANS terminer la poignée de main. Utile aux appareils qui exigent
+    un certificat client (ex. décodeurs d'opérateur) : ils coupent la connexion après avoir envoyé le leur, et la lecture normale échoue.
+    Limité à TLS 1.2 (en 1.3 le certificat est chiffré). Rien n'est envoyé hormis le message d'ouverture. -> DER ou None."""
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    ctx.check_hostname, ctx.verify_mode = False, ssl.CERT_NONE
+    ctx.maximum_version = ssl.TLSVersion.TLSv1_2
+    incoming, outgoing = ssl.MemoryBIO(), ssl.MemoryBIO()
+    tls = ctx.wrap_bio(incoming, outgoing)
+    got = b""
+    try:
+        with socket.create_connection((ip, port), timeout=timeout) as s:
+            s.settimeout(timeout)
+            end = time.time() + timeout
+            while len(got) < 65536 and time.time() < end:
+                try:
+                    tls.do_handshake()
+                except ssl.SSLWantReadError:
+                    pass
+                except ssl.SSLError:
+                    return tls_certificate_in(got)
+                data = outgoing.read()
+                if data:
+                    s.sendall(data)
+                chunk = s.recv(16384)
+                if not chunk:
+                    break
+                got += chunk
+                cert = tls_certificate_in(got)
+                if cert:
+                    return cert
+                incoming.write(chunk)
+    except (OSError, ValueError):
+        return tls_certificate_in(got) if got else None
+    return tls_certificate_in(got)
+
+
 def grab_banner(ip, port, timeout=1.5):
     """Bannière d'un service : première ligne (SSH, FTP) ou résumé HTTP/HTTPS. Aucune authentification n'est tentée.
     Le certificat HTTPS n'est volontairement pas vérifié : les appareils du réseau local sont presque toujours auto-signés
@@ -313,7 +381,15 @@ def grab_banner(ip, port, timeout=1.5):
         if port in TLS_PORTS:
             ctx = ssl.create_default_context()
             ctx.check_hostname, ctx.verify_mode = False, ssl.CERT_NONE
-            s = ctx.wrap_socket(s)
+            try:
+                s = ctx.wrap_socket(s)
+            except OSError:  # poignée de main refusée (certificat client exigé…) : le certificat du serveur a pourtant pu être envoyé
+                der = peek_certificate(ip, port, timeout)
+                info = certs.summary(certs.parse_cert(der)) if der else {}
+                if info:
+                    with _cert_lock:
+                        _cert_cache[(ip, port)] = info
+                return ""
             try:  # certificat présenté, même non vérifié : sert d'indice (marque, modèle) et de contrôle d'expiration
                 info = certs.summary(certs.parse_cert(s.getpeercert(binary_form=True) or b""))
             except (ValueError, OSError):
@@ -558,10 +634,11 @@ class Scanner:
         warnings: list = []
         info: list = []
         for src in sources:
-            host, comm = src.get("host", ""), src.get("community", "public")
+            host = src.get("host", "")
             try:
                 if not ipaddress.ip_address(host).is_private:
                     raise ValueError(tr("adresse non privée"))
+                comm = snmpv3.credential(src)  # communauté v2c ou utilisateur v3
                 t = snmp.read_tables(host, comm, port=src.get("port", 161))
             except (snmp.SnmpError, ValueError, OSError) as e:
                 log.warning("SNMP %s : %s", host, e)
@@ -653,6 +730,8 @@ class Scanner:
                     or extra.get("leases", {}).get(mac, ""))
         with _nb_lock:
             netbios = _nb_info.pop(ip, {})
+        with _rtt_lock:
+            rtt = _rtt_cache.pop(ip, None)
         if me:
             hostname = socket.gethostname()
         ttl = 64 if me else (f_ttl.result() if (active and f_ttl) else None)
@@ -664,7 +743,7 @@ class Scanner:
                "is_gateway": ip == net["gateway"], "is_self": me,
                "random_mac": fingerprint.is_random_mac(mac), "online": True,
                "mdns_services": sorted(md.get("services", [])), "mdns_names": names,
-               "mdns_txt": md.get("txt", {}), "ssdp": ss, "wsd": wd, "netbios": netbios, "cert": cert_info}
+               "mdns_txt": md.get("txt", {}), "ssdp": ss, "wsd": wd, "netbios": netbios, "cert": cert_info, "rtt": rtt}
         if not me and not active:
             dev["light"] = True  # détails non sondés : l'interface ne les présente pas comme vérifiés
         dev["http_info"] = " ".join(v for k, v in banners.items() if k in HTTP_PORTS or k in TLS_PORTS)[:300]

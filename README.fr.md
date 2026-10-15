@@ -27,10 +27,11 @@ compare deux scans et exporte des rapports PDF. Le moteur de scan est **écrit �
 - **Plusieurs réseaux et VLAN** : plages saisies à la main ou détectées (routes, interfaces 802.1Q, passerelles),
   chemin traceroute, avertissement si un réseau ne répond pas, **SNMP** en lecture seule (adresses MAC et ports de
   switch d'autres VLAN), voisins **LLDP/CDP**.
+- **Profils de scan** : plages, profondeur, interface, hôtes SNMP et options enregistrés sous un nom (Scan → Profils de scan) ; un profil ne contient jamais de secret et ne donne jamais le consentement à l'analyse de sécurité.
 - **Surveillance** : découverte par **ARP** (scan normal ≈ 10 s), scan de **présence** (≈ 2 s, presque aucun trafic) qui réutilise
   les détails du dernier scan complet, arrêt du scan, profondeur rapide / normal / approfondi, scan automatique
   (présence + un scan complet par heure), appareils *hors ligne*, *nouveaux* appareils avec notification de bureau.
-- **Historique** (SQLite) : présence sur les derniers scans, disponibilité, journal des événements (nouvel appareil,
+- **Historique** (SQLite) : présence sur les derniers scans, disponibilité, **courbe de latence** (le ping de chaque scan complet), journal des événements (nouvel appareil,
   changement d'IP, hors ligne, retour…), appareils **de confiance**, **comparaison de deux scans**, **fusion de doublons**
   (une MAC « privée » qui change : suggestion automatique, alias conservés), taille et purge configurables.
 - **Analyse de sécurité optionnelle, en lecture seule** : ports sensibles, services accessibles sans mot de passe,
@@ -108,7 +109,8 @@ pour le renommer, changer son type ou le marquer de confiance. La langue (franç
 | `discovery.py`, `dhcp.py` | SSDP/UPnP, mDNS/Bonjour, WS-Discovery (analyse des paquets écrite à la main) ; baux DHCP |
 | `fingerprint.py`, `rules.py`, `models.py` | fabricant (OUI), système, classification par score ; règles personnalisées ; noms de modèles |
 | `networks.py`, `topology.py` | interfaces, VLAN, plages ; traceroute, voisins LLDP/CDP |
-| `snmp.py` | client SNMP v2c en lecture seule (BER écrit à la main) |
+| `snmp.py`, `snmpv3.py` | client SNMP en lecture seule : v2c, et v3 authNoPriv (BER et USM écrits à la main) |
+| `profiles.py` | profils de scan enregistrés |
 | `security.py` | règles d'exposition et vérifications sans authentification |
 | `history.py`, `store.py`, `compare.py`, `identity.py` | base SQLite (historique, journal, confiance, positions, instantanés, alias), réglages manuels, comparaison, doublons probables |
 | `layout.py` | arbre de la topologie et disposition hiérarchique |
@@ -148,6 +150,8 @@ du noyau, les baux DHCP locaux et reprend les détails du dernier scan complet. 
 leur seul fabricant (MAC) ; une entrée ancienne du noyau peut afficher quelques minutes un appareil déjà parti.
 
 ### SNMP et LLDP/CDP (optionnels)
+
+SNMP **v3** est géré au niveau *authNoPriv* (utilisateur + mot de passe, HMAC-SHA/SHA-256/MD5, chaque requête signée et chaque réponse vérifiée ; les clés sont dérivées comme dans le RFC 3414 et contrôlées avec ses vecteurs de test). Il n'y a pas de chiffrement (la bibliothèque standard n'a pas AES) : les réponses circulent en clair, à réserver à un réseau d'administration de confiance. Le mot de passe v3 va dans le trousseau comme la communauté v2c.
 
 La communauté SNMP est rangée dans le **trousseau du système** (`secret-tool`, GNOME Keyring / KWallet) quand il est
 installé, sinon dans un fichier privé en mode 600 ; elle n'est jamais écrite dans les réglages ni dans le journal.

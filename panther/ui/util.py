@@ -42,6 +42,10 @@ def tip(text):
     return "<div style='white-space:pre-wrap'>" + html.escape(str(text), quote=False) + "</div>"
 
 
+def snmp_v3_secret(host):
+    return f"snmp-v3-password:{host}"
+
+
 def snmp_secret(host):
     return f"snmp-community:{host}"
 

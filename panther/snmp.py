@@ -141,6 +141,9 @@ def parse_message(data):
 
 # ------------------------------------------------------------------ client
 def _exchange(host, community, pdu_type, oids, port, timeout, retries=2, nonrep=0, maxrep=0):
+    if not isinstance(community, str):  # un utilisateur SNMP v3 (snmpv3.V3User) à la place d'une communauté v2c
+        from . import snmpv3
+        return snmpv3.exchange(host, community, pdu_type, oids, port, timeout, retries, nonrep, maxrep)
     req_id = random.randint(1, 2 ** 30)
     pkt = build_request(pdu_type, community, req_id, oids, nonrep, maxrep)
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)

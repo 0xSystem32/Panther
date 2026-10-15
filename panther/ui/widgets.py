@@ -1,6 +1,6 @@
 """Petits widgets réutilisables : présence, tri, libellé tronqué, liste déroulante rafraîchie."""
-from PyQt6.QtCore import QRectF, QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QFontMetrics, QPainter
+from PyQt6.QtCore import QPointF, QRectF, QSize, Qt, pyqtSignal
+from PyQt6.QtGui import QColor, QFontMetrics, QPainter, QPen
 from PyQt6.QtWidgets import QComboBox, QLabel, QSizePolicy, QTableWidgetItem, QWidget
 
 from ..i18n import tr
@@ -25,6 +25,57 @@ class PresenceBar(QWidget):
         for i, seen in enumerate(self.flags):
             p.setBrush(QColor(T["ok"] if seen else T["border"]))
             p.drawRoundedRect(QRectF(i * 10, 2, 7, 14), 2, 2)
+
+
+class LatencyChart(QWidget):
+    """Courbe de latence (ms) sur les derniers scans ; un trait rouge en bas marque un scan où l'appareil n'a pas répondu, un point
+    pâle une présence sans mesure (scan de présence). La ligne se coupe aux trous au lieu d'inventer des valeurs."""
+
+    def __init__(self, series, parent=None):
+        super().__init__(parent)
+        self.series = series
+        self.setFixedHeight(54)
+        self.setMinimumWidth(180)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setAccessibleName(tr("Latence"))
+        vals = [ms for _ts, ms, _p in series if ms is not None]
+        self.setToolTip(tr("Latence sur les {n} derniers scans : de {low} à {high} ms (en bas : scans sans réponse)", n=len(series),
+                           low=f"{min(vals):.1f}" if vals else "–", high=f"{max(vals):.1f}" if vals else "–"))
+
+    def points(self, w, h, pad=6):
+        """[(x, y, état)] ; état : « ms » mesure, « absent », « sans mesure »."""
+        vals = [ms for _ts, ms, _p in self.series if ms is not None]
+        top = max(vals) if vals else 1.0
+        top = max(top, 1.0)
+        n = len(self.series)
+        out = []
+        for i, (_ts, ms, present) in enumerate(self.series):
+            x = pad + (w - 2 * pad) * (i / (n - 1) if n > 1 else 0.5)
+            if ms is not None:
+                out.append((x, h - pad - (h - 2 * pad) * ms / top, "ms"))
+            else:
+                out.append((x, h - pad, "sans mesure" if present else "absent"))
+        return out
+
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = self.width(), self.height()
+        p.setPen(QPen(QColor(T["border"]), 1))
+        p.drawLine(6, h - 6, w - 6, h - 6)
+        line, prev = QPen(QColor(T["acc"]), 1.8), None
+        for x, y, state in self.points(w, h):
+            if state == "ms":
+                if prev is not None:
+                    p.setPen(line); p.drawLine(QPointF(*prev), QPointF(x, y))
+                p.setPen(Qt.PenStyle.NoPen); p.setBrush(QColor(T["acc"])); p.drawEllipse(QPointF(x, y), 2.2, 2.2)
+                prev = (x, y)
+            else:
+                prev = None                                            # trou : la ligne se coupe
+                if state == "absent":
+                    p.setPen(QPen(QColor(T["bad"]), 2)); p.drawLine(QPointF(x, h - 6), QPointF(x, h - 14))
+                else:
+                    p.setPen(Qt.PenStyle.NoPen); p.setBrush(QColor(T["mut"])); p.drawEllipse(QPointF(x, h - 6), 1.6, 1.6)
 
 
 class SortItem(QTableWidgetItem):

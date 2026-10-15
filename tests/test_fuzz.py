@@ -10,7 +10,7 @@ import tempfile
 import time
 import unittest
 
-from panther import certs, dhcp, discovery, scanner, snmp, topology
+from panther import certs, dhcp, discovery, scanner, snmp, snmpv3, topology
 from tests import test_certs, test_sources, test_topology
 
 ONVIF, nbstat = test_sources.ONVIF, test_sources.nbstat
@@ -84,6 +84,17 @@ class FuzzTests(unittest.TestCase):
 
     def test_snmp_tlv_walker(self):
         self.run_all(lambda d: snmp.parse_tlv(d, 0), snmp.build_request(0xA0, "c", 1, ["1.3.6.1.2.1.1.1.0"]), (snmp.SnmpError,), "snmp.parse_tlv")
+
+    def test_snmp_v3_message_parser(self):
+        key = snmpv3.localize(snmpv3.password_to_key("motdepasse-long", "sha1"), b"\x80\x00\x1f\x88\x01", "sha1")
+        user = snmpv3.V3User("lecteur", "motdepasse-long", "sha1")
+        sample = snmpv3.build_request(user, key, (b"\x80\x00\x1f\x88\x01", 3, 1000), 5, snmp.GET, 6, ["1.3.6.1.2.1.1.5.0"])
+        self.run_all(snmpv3.parse_message, sample, (snmp.SnmpError,), "snmpv3.parse_message")
+        self.run_all(snmpv3.parse_message, snmpv3.build_discovery(1, 2), (snmp.SnmpError,), "snmpv3.parse_message (découverte)")
+
+    def test_tls_certificate_extraction(self):
+        flight = b"\x16\x03\x03\x00\x0e" + b"\x0b\x00\x00\x0a\x00\x00\x07\x00\x00\x04\x30\x02\x05\x00"
+        self.run_all(scanner.tls_certificate_in, flight, (), "scanner.tls_certificate_in")
 
     def test_lldp_and_cdp_frames(self):
         frame = test_topology.LldpTests().frame()

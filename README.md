@@ -30,10 +30,11 @@ only the graphical interface uses PyQt6. The interface is available in **English
 - **Several networks and VLANs**: ranges typed by hand or detected (routes, 802.1Q interfaces, gateways), traceroute path,
   warning when a network does not answer, read-only **SNMP** (MAC addresses and switch ports of other VLANs), **LLDP/CDP**
   neighbours.
+- **Scan profiles**: save ranges, depth, interface, SNMP hosts and options under a name (Scan → Scan profiles); a profile never stores a secret and never grants the security-analysis consent.
 - **Monitoring**: **ARP** discovery (normal scan ≈ 10 s), **presence** scan (≈ 2 s, almost no traffic) that reuses the details
   of the last full scan, stoppable scans, quick / normal / thorough depth, automatic scan (presence + one full scan per
   hour), *offline* devices, *new* devices with a desktop notification.
-- **History** (SQLite): presence over the last scans, availability, event log (new device, IP change, offline, back…),
+- **History** (SQLite): presence over the last scans, availability, **latency curve** (from the ping of each full scan), event log (new device, IP change, offline, back…),
   **trusted** devices, **comparison of two scans**, **duplicate merging** (a “private” MAC that changes: automatic
   suggestion, aliases kept), configurable size and purge.
 - **Optional read-only security analysis**: sensitive ports, services reachable without a password, obsolete services, with
@@ -108,7 +109,8 @@ change its type or mark it as trusted. The language is chosen in the *View → L
 | `discovery.py`, `dhcp.py` | SSDP/UPnP, mDNS/Bonjour, WS-Discovery (packet parsing written by hand); DHCP leases |
 | `fingerprint.py`, `rules.py`, `models.py` | vendor (OUI), system, score-based classification; custom rules; model names |
 | `networks.py`, `topology.py` | interfaces, VLANs, ranges; traceroute, LLDP/CDP neighbours |
-| `snmp.py` | read-only SNMP v2c client (BER written by hand) |
+| `snmp.py`, `snmpv3.py` | read-only SNMP client: v2c, and v3 authNoPriv (BER and USM written by hand) |
+| `profiles.py` | saved scan profiles |
 | `security.py` | exposure rules and unauthenticated checks |
 | `history.py`, `store.py`, `compare.py`, `identity.py` | SQLite database (history, log, trust, positions, snapshots, aliases), manual settings, comparison, likely duplicates |
 | `layout.py` | topology tree and hierarchical layout |
@@ -145,6 +147,8 @@ neighbour table and the local DHCP leases and reuses the details of the last ful
 their vendor (from the MAC) only; an old kernel entry can show a device that has just left for a few minutes.
 
 ### SNMP and LLDP/CDP (optional)
+
+SNMP **v3** is supported at the *authNoPriv* level (user + password, HMAC-SHA/SHA-256/MD5, every request signed and every answer verified; keys are derived as in RFC 3414 and checked against its test vectors). There is no encryption (the standard library has no AES), so answers travel in clear text: use it on a trusted management network. The v3 password goes to the keyring like the v2c community.
 
 The SNMP community is stored in the **system keyring** (`secret-tool`, GNOME Keyring / KWallet) when it is installed,
 otherwise in a private file in mode 600; it is never written to the settings or the log. An old plain-text configuration is

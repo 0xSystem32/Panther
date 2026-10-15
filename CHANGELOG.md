@@ -19,6 +19,8 @@ All notable changes are listed here. Format: [Keep a Changelog](https://keepacha
   coverage gate in CI; `CONTRIBUTING.md`, pre-commit, issue templates.
 - **Packaging**: man page, bash and zsh completions, release workflow (wheel + .deb attached to a GitHub release on `v*` tags).
 
+- **Late additions**: latency curve per device, saved scan profiles, SNMP v3 (authNoPriv), TLS certificate read from servers that demand a client certificate (set-top boxes), animated final map layout, iPhone 16 models.
+
 ### Changed
 - Scan discovery uses the kernel's ARP table: a normal scan goes from ~98 s to ~11 s on a small network; a presence scan takes ~2 s.
 - Device identity is the MAC address first (an IP change is an event, never a duplicate).

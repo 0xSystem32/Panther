@@ -24,15 +24,15 @@ effort **S** (< 1 h) · **M** (quelques heures) · **L** (plus d'une journée).
 - [ ] **P3 · M** Distinguer Wi-Fi et câble sur la carte hiérarchique (SNMP / LLDP / tables de bridge) — dépend d'un vrai switch administrable (section 0)
 - [x] Fichier > Historique et données : taille et contenu de la base, durée de conservation configurable, purge + compactage
 
-- [ ] **P3 · S** Animer le recalcul final de la carte à la fin d'un scan (les nœuds sautent d'un coup à leur place définitive)
+- [x] Les nœuds glissent à leur place définitive à la fin d'un scan (désactivable : Affichage → Animer la carte)
 
 ## 2. Détection des appareils
 - [x] Règles de détection extensibles (`rules.json`, `docs/REGLES.md`) : 11 conditions, points ou `force`, création depuis un appareil (clic droit), liste avec nombre d'appareils concernés, import/export, fichier traité comme non fiable (motifs à risque refusés)
 - [x] Nouvelles sources : titre/`realm`/serveur HTTP et HTTPS, WS-Discovery (ONVIF, imprimantes, Windows), NetBIOS complet (groupe de travail, serveur de fichiers), baux DHCP locaux (dnsmasq, Pi-hole, isc-dhcp)
 - [x] Noms de modèles lisibles : table sûre (iPhone 8 à 15, iPad, Mac, Apple TV, HomePod) avec repli sur la famille, familles Samsung, modèles personnalisables (⚠ `iPhone14,2` est un iPhone 13 **Pro**, pas un 13 : vérifié par un test)
-- [ ] **P2 · S** Vérifier la table des modèles Apple sur de vrais appareils (et compléter : iPhone 16, Mac récents, Galaxy, Pixel)
+- [ ] **P2 · S** Vérifier la table des modèles Apple sur de vrais appareils (iPhone 16 ajouté ; reste : Mac récents, Galaxy, Pixel, dont les identifiants ne sont pas sûrs de mémoire)
 - [x] Certificat HTTPS comme indice (sujet, émetteur, noms alternatifs, expiration) : décodeur DER écrit à la main, fabricant de secours sans MAC, règle `cert`, constat « certificat expiré » ; vérifié sur la Livebox (modèle exact lu)
-- [ ] **P3 · S** Certains appareils ouvrent le port HTTPS mais n'en livrent ni page ni certificat (ex. un décodeur Sagemcom) : voir si une autre version de TLS ou une attente plus longue suffit
+- [x] Cause trouvée sur le vrai décodeur : il exige un certificat client (mTLS) et coupe la connexion après la 1re réponse, mais sa réponse contient son certificat : lu sans terminer la poignée de main (TLS ≤ 1.2) → « Orange / stbste » → type TV
 - [ ] **P3 · L** Empreinte du système par réponses TCP/IP (TTL, fenêtre, options), au-delà du TTL
 - [ ] **P3 · L** Support IPv6 (découverte NDP, adresses multiples par appareil)
 
@@ -42,10 +42,10 @@ effort **S** (< 1 h) · **M** (quelques heures) · **L** (plus d'une journée).
 - [x] Rapport PDF planifié (quotidien ou hebdomadaire) dans un dossier choisi, nettoyage des plus anciens (seuls ses propres fichiers)
 - [x] Export de la carte en PNG/SVG ; export enrichi (confiance, historique)
 - [x] Réveil à distance (Wake-on-LAN) d'un appareil hors ligne
-- [ ] **P3 · M** Latence et disponibilité par appareil (courbe dans le panneau)
-- [ ] **P3 · M** Profils de scan enregistrés (plages, profondeur, interface, SNMP)
+- [x] Latence par appareil : le ping du scan complet fournit TTL et latence (aucune sonde de plus), colonne `rtt` (base v7), courbe dans le panneau avec trous (absent / sans mesure) et statistiques
+- [x] Profils de scan (menu Scan) : plages, profondeur, interface, hôtes SNMP, écoute seule, analyse ; sans secret, sans consentement implicite
 - [x] Mise à jour de la base IEEE depuis un menu (avec confirmation)
-- [ ] **P3 · M** SNMP v3 (authentification et chiffrement) en plus de v2c — la bibliothèque standard n'a pas AES : au mieux authNoPriv sans dépendance
+- [x] SNMP v3 authNoPriv (MD5, SHA-1, SHA-256) : clés vérifiées sur les vecteurs du RFC 3414, requêtes signées, réponses vérifiées, motifs de refus de l'agent traduits, interface dans Réseaux à scanner. Jamais essayé sur un vrai agent (faux agent de test). Reste ouvert : authPriv (chiffrement), qui demande une dépendance
 - [ ] **P3 · L** Plusieurs sites / plusieurs machines d'écoute
 
 ## 4. Vie privée et sécurité du logiciel
