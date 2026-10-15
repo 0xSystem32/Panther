@@ -147,7 +147,7 @@ class Lab:
         if via:
             ip(f"route add default via {via}", ns, check=False)
 
-    def start_agent(self):
+    def start_agent(self, v3=False):
         """Switch administrable fictif (agent SNMP v2c « public » sur 192.168.1.1:161) qui connaît les hôtes du lab :
         ARP du routeur pour le VLAN 20, table des ports (FDB) pour deux hôtes du LAN, noms de ports."""
         data = {"1.3.6.1.2.1.1.5.0": "core-sw", "1.3.6.1.2.1.1.1.0": "Switch de laboratoire",
@@ -159,7 +159,7 @@ class Lab:
         for last, port in ((10, 3), (11, 4)):
             mac = ".".join(str(int(b, 16)) for b in self.macs[f"192.168.1.{last}"].split(":"))
             data[f"1.3.6.1.2.1.17.7.1.2.2.1.2.1.{mac}"] = port
-        self.procs.append(subprocess.Popen(["nsenter", "-t", str(self.R), "-n", "--", sys.executable, os.path.abspath(__file__), "--agent", json.dumps(data)],
+        self.procs.append(subprocess.Popen(["nsenter", "-t", str(self.R), "-n", "--", sys.executable, os.path.abspath(__file__), "--agent3" if v3 else "--agent", json.dumps(data)],
                                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
         time.sleep(0.5)
 
@@ -248,16 +248,24 @@ def serve(spec):
     threading.Event().wait()
 
 
-def agent(data):
-    """Agent SNMP de laboratoire (dans l'espace de noms du routeur). Valeurs : entier, texte ou {"mac": "aa:bb:…"}."""
-    from tests.test_snmp import FakeAgent
+V3_USER = ("lecteur", "motdepasse-long", "sha1")  # valeurs d'essai du laboratoire, sans rapport avec un vrai réseau
+
+
+def agent(data, v3=False):
+    """Agent SNMP de laboratoire (dans l'espace de noms du routeur). Valeurs : entier, texte ou {"mac": "aa:bb:…"}. v3 : authNoPriv (SHA-1)."""
     conv = {k: bytes.fromhex(v["mac"].replace(":", "")) if isinstance(v, dict) else v.encode() if isinstance(v, str) else v for k, v in data.items()}
-    FakeAgent(conv, host="0.0.0.0", port=161).run()
+    if v3:
+        from panther.snmpv3 import V3User
+        from tests.test_snmpv3 import FakeV3Agent
+        FakeV3Agent(conv, user=V3User(*V3_USER), host="0.0.0.0", port=161).run()
+    else:
+        from tests.test_snmp import FakeAgent
+        FakeAgent(conv, host="0.0.0.0", port=161).run()
 
 
 # ---- scénario : scan complet depuis S ---------------------------------------------------------------------------------
 
-def scenario(extra_lan=0, depth="normal", security=True, targets=("192.168.20.0/24",), snmp=False):
+def scenario(extra_lan=0, depth="normal", security=True, targets=("192.168.20.0/24",), snmp=False, v3=False):
     from panther import networks
     from panther.scanner import Scanner
     tmp = tempfile.mkdtemp()
@@ -271,8 +279,8 @@ def scenario(extra_lan=0, depth="normal", security=True, targets=("192.168.20.0/
         sc = Scanner()
         sources = []
         if snmp:
-            lab.start_agent()
-            sources = [{"host": "192.168.1.1", "community": "public"}]
+            lab.start_agent(v3)
+            sources = [{"host": "192.168.1.1", **({"user": V3_USER[0], "auth_password": V3_USER[1], "auth_proto": V3_USER[2]} if v3 else {"community": "public"})}]
         t0 = time.time()
         sc.start(list(targets) + auto, sources, depth, security)
         while sc.snapshot()["status"] == "scanning":
@@ -281,7 +289,7 @@ def scenario(extra_lan=0, depth="normal", security=True, targets=("192.168.20.0/
         out.update(duration=round(time.time() - t0, 1), status=snap["status"], error=snap["error"], warnings=snap["warnings"],
                    networks=snap["networks"], paths=snap["paths"], network=snap["network"])
         out["snmp"] = snap["snmp"]
-        out["devices"] = [{k: d.get(k) for k in ("ip", "mac", "type", "network", "vlan", "ports", "hostname", "path", "is_gateway", "is_self", "is_switch", "switch", "switch_port")}
+        out["devices"] = [{k: d.get(k) for k in ("ip", "mac", "type", "network", "vlan", "ports", "hostname", "path", "is_gateway", "is_self", "is_switch", "switch", "switch_port", "ipv6")}
                           | {"security": [f["id"] for f in d.get("security") or []]} for d in snap["devices"]]
         out["lab"] = {"R": lab.R}
     shutil.rmtree(tmp, ignore_errors=True)
@@ -301,9 +309,9 @@ def lldp_scenario():
     return result
 
 
-def run_scenario(extra_lan=0, depth="normal", security=True, targets=("192.168.20.0/24",), snmp=False, timeout=300, name="scenario"):
+def run_scenario(extra_lan=0, depth="normal", security=True, targets=("192.168.20.0/24",), snmp=False, v3=False, timeout=300, name="scenario"):
     """Lance `scenario` dans un `unshare -Urn` et renvoie son résultat (dict)."""
-    cmd = ["unshare", "-Urn", sys.executable, os.path.abspath(__file__), f"--{name}", json.dumps({"extra_lan": extra_lan, "depth": depth, "security": security, "targets": list(targets), "snmp": snmp} if name == "scenario" else {})]
+    cmd = ["unshare", "-Urn", sys.executable, os.path.abspath(__file__), f"--{name}", json.dumps({"extra_lan": extra_lan, "depth": depth, "security": security, "targets": list(targets), "snmp": snmp, "v3": v3} if name == "scenario" else {})]
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, cwd=ROOT, env={**os.environ, "PYTHONPATH": ROOT})
     if r.returncode:
         raise RuntimeError(r.stderr[-2000:] or r.stdout[-2000:])
@@ -318,12 +326,14 @@ def main():
     ap.add_argument("--scenario", help=argparse.SUPPRESS)
     ap.add_argument("--lldp", help=argparse.SUPPRESS)
     ap.add_argument("--agent", help=argparse.SUPPRESS)
+    ap.add_argument("--agent3", help=argparse.SUPPRESS)
     ap.add_argument("--snmp", action="store_true", help="ajoute un switch SNMP fictif (core-sw) sur le routeur")
+    ap.add_argument("--v3", action="store_true", help="avec --snmp : SNMP v3 authNoPriv au lieu de v2c")
     a = ap.parse_args()
     if a.services:
         serve({k: [tuple(s) for s in v] for k, v in json.loads(a.services).items()})
-    elif a.agent:
-        agent(json.loads(a.agent))
+    elif a.agent or a.agent3:
+        agent(json.loads(a.agent or a.agent3), v3=bool(a.agent3))
     elif a.lldp:
         print(json.dumps(lldp_scenario()))
     elif a.scenario:
@@ -331,7 +341,7 @@ def main():
     else:
         if not available():
             sys.exit("Espaces de noms sans privilèges indisponibles ici.")
-        print(json.dumps(run_scenario(a.hosts, a.depth, snmp=a.snmp), indent=2, ensure_ascii=False))
+        print(json.dumps(run_scenario(a.hosts, a.depth, snmp=a.snmp or a.v3, v3=a.v3), indent=2, ensure_ascii=False))
 
 
 if __name__ == "__main__":

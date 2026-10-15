@@ -11,6 +11,7 @@ fabricants. `python3 tools/lab.py [--hosts 200] [--snmp]` affiche un scan comple
 - [x] **Fait dans le labo** Vrai VLAN routé : autre plage, traceroute par le routeur, avertissement « aucun hôte n'a répondu » sur une plage vide
 - [x] **Fait dans le labo** VLAN étiqueté porté par la machine (`s0.30`) : trouvé tout seul, scanné par ARP (MAC, fabricant, type, n° de VLAN), adresse propre reconnue comme « cette machine » ; a révélé un scan routé trop lent (148 s → 30 s) et des VLAN rattachés scannés sans MAC (corrigés)
 - [x] **Fait dans le labo** SNMP par un vrai échange UDP (nom, ARP du routeur pour le VLAN 20, table des ports : appareil → switch + port), routeur reconnu comme switch
+- [x] **Fait dans le labo** SNMP v3 authNoPriv (SHA-1) par un vrai échange UDP, et adresses IPv6 des voisins (fe80::) lues après le ping multicast
 - [x] **Fait dans le labo** LLDP et CDP reçus par un vrai socket `AF_PACKET` (trames émises sur le câble virtuel)
 - [x] **Fait dans le labo** Analyse de sécurité contre de vrais services : Redis ouvert/protégé, RTSP ouvert, Telnet, MQTT, SSH récent sans faux positif
 - [x] **Fait dans le labo** Gros réseau : 215 appareils trouvés en 39 s, sans avertissement
@@ -19,7 +20,7 @@ fabricants. `python3 tools/lab.py [--hosts 200] [--snmp]` affiche un scan comple
 - [ ] **P1 · S** Tester l'analyse de sécurité sur de **vrais** appareils (caméra, NAS) : les faux positifs dépendent des micrologiciels
 - [ ] **P2 · S** Installer le `.deb` avec `apt` sur une machine propre (Debian 13 et Ubuntu 24.04) ; tester les notifications de bureau
 - [ ] **P2 · S** Un vrai réseau Wi-Fi + câble pour la carte hiérarchique (le labo n'a pas de Wi-Fi)
-- [ ] **P3 · S** Compléter le labo : DHCP (baux réels), mDNS/SSDP entre machines, IPv6 (voisins), SNMP v3 (un agent v3 d'essai existe déjà dans les tests unitaires)
+- [ ] **P3 · S** Compléter le labo : DHCP (baux réels), mDNS/SSDP entre machines (le multicast ne traverse pas le pont du labo comme sur un vrai Wi-Fi)
 
 ## 1. Fiabilité et performance
 - [x] Identité des appareils par la **MAC d'abord** (changement d'IP = événement, jamais un doublon)

@@ -12,12 +12,12 @@ USER = snmpv3.V3User("lecteur", "motdepasse-long", "sha1")
 class FakeV3Agent(threading.Thread):
     """Agent SNMP v3 authNoPriv minimal : répond à la découverte, vérifie la signature, signe ses réponses."""
 
-    def __init__(self, data, user=USER, forge=False, silent_on_bad_auth=False):
+    def __init__(self, data, user=USER, forge=False, silent_on_bad_auth=False, host="127.0.0.1", port=0):
         super().__init__(daemon=True)
         self.data = dict(sorted((snmp.oid_tuple(k), v) for k, v in data.items()))
         self.user, self.forge, self.silent = user, forge, silent_on_bad_auth
         self.key = snmpv3.localize(snmpv3.password_to_key(user.password, user.proto), ENGINE, user.proto)
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); self.sock.bind(("127.0.0.1", 0)); self.sock.settimeout(0.2)
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); self.sock.bind((host, port)); self.sock.settimeout(0.2)
         self.port = self.sock.getsockname()[1]
         self.stop, self.seen = False, []
 

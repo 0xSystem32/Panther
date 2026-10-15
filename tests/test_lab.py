@@ -90,6 +90,18 @@ class LabSwitchTests(unittest.TestCase):
         self.assertTrue(self.by_ip["192.168.20.10"]["mac"])
         self.assertTrue(self.by_ip["192.168.20.11"]["mac"])
 
+    def test_snmp_v3_over_the_network(self):
+        r = lab.run_scenario(snmp=True, v3=True, security=False, targets=())
+        self.assertEqual(r["snmp"], [{"host": "192.168.1.1", "name": "core-sw", "arp": 2, "fdb": 2}])
+        self.assertEqual(r["warnings"], [])
+        cam = next(d for d in r["devices"] if d["ip"] == "192.168.1.10")
+        self.assertEqual((cam["switch"], cam["switch_port"]), ("core-sw", "Gi1/0/3"))
+
+    def test_ipv6_neighbours_are_read_for_lan_devices(self):
+        withv6 = [d for d in self.r["devices"] if d["ip"].startswith("192.168.1.") and d.get("ipv6")]
+        self.assertGreaterEqual(len(withv6), 3, "les hôtes du LAN ont une adresse fe80:: connue du noyau après le ping multicast")
+        self.assertTrue(all(a.startswith("fe80:") for d in withv6 for a in d["ipv6"]))
+
     def test_lldp_and_cdp_frames_are_received_from_the_wire(self):
         r = lab.run_scenario(name="lldp")
         self.assertEqual(r["status"], "ok")
