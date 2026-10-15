@@ -8,12 +8,12 @@ from panther import snmp
 class FakeAgent(threading.Thread):
     """Agent SNMP v2c minimal en lecture, sur 127.0.0.1, avec une communauté « public »."""
 
-    def __init__(self, data, community="public"):
+    def __init__(self, data, community="public", host="127.0.0.1", port=0):
         super().__init__(daemon=True)
         self.data = dict(sorted(((snmp.oid_tuple(k), v) for k, v in data.items())))
         self.community = community
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.sock.bind(("127.0.0.1", 0))
+        self.sock.bind((host, port))
         self.sock.settimeout(0.2)
         self.port = self.sock.getsockname()[1]
         self.stop = False

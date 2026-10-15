@@ -1,4 +1,6 @@
+import socket
 import threading
+import time
 import unittest
 from unittest import mock
 
@@ -115,3 +117,37 @@ class ArpDiscoverTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ProbeAliveTests(unittest.TestCase):
+    """`probe_alive` sonde tous les ports à la fois : un port ouvert OU refusé prouve que l'hôte est là."""
+
+    def listener(self):
+        s = socket.socket()
+        s.bind(("127.0.0.1", 0))
+        s.listen(5)
+        self.addCleanup(s.close)
+        return s.getsockname()[1]
+
+    def free_port(self):
+        s = socket.socket()
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+        s.close()
+        return port
+
+    def test_open_port_means_alive(self):
+        self.assertTrue(scanner.probe_alive("127.0.0.1", 0.5, (self.free_port(), self.listener())))
+
+    def test_refused_port_means_alive(self):
+        self.assertTrue(scanner.probe_alive("127.0.0.1", 0.5, (self.free_port(),)))
+
+    def test_no_ports_means_not_alive(self):
+        self.assertFalse(scanner.probe_alive("127.0.0.1", 0.2, ()))
+
+    def test_silent_host_costs_one_timeout_not_one_per_port(self):
+        # 192.0.2.0/24 (TEST-NET-1) ne répond jamais ; selon le réseau le noyau refuse tout de suite (injoignable) ou laisse expirer.
+        t0 = time.monotonic()
+        alive = scanner.probe_alive("192.0.2.77", 0.5, tuple(range(2000, 2012)))
+        self.assertFalse(alive)
+        self.assertLess(time.monotonic() - t0, 2.5)  # 12 ports × 0,5 s = 6 s si on les sondait un par un

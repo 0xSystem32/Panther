@@ -4,13 +4,22 @@ Liste complète, à traiter après les 8 phases de [CHECKLIST.md](CHECKLIST.md) 
 Légende : `[x]` fait · `[ ]` à faire · **P1** à faire d'abord · **P2** ensuite · **P3** plus tard ·
 effort **S** (< 1 h) · **M** (quelques heures) · **L** (plus d'une journée).
 
-## 0. Vérifier sur du vrai matériel (rien de tout ceci n'a été testé en conditions réelles)
-- [ ] **P1 · S** Exécuter la CI sur GitHub (créer le dépôt, pousser) : le workflow n'a jamais tourné ; confirmer Python 3.12
-- [ ] **P1 · M** Tester SNMP, LLDP/CDP et la hiérarchie sur un vrai switch administrable (aujourd'hui : faux agent et trames fabriquées)
-- [ ] **P1 · M** Tester un vrai VLAN routé (autre plage, traceroute, avertissement « injoignable »)
-- [ ] **P1 · S** Tester l'analyse de sécurité sur de vrais appareils (caméra, NAS, Redis de test) et vérifier les faux positifs
+## 0. Vérifier sur du vrai matériel
+Un **laboratoire réseau virtuel sans root** (`tools/lab.py`, `tests/test_lab.py`) simule un vrai réseau avec des espaces de noms Linux : VLAN 802.1Q, routeur,
+hôtes aux services réels, faux switch SNMP, vraies trames LLDP/CDP. Il remplace une grande partie des essais matériels, mais pas les particularités des
+fabricants. `python3 tools/lab.py [--hosts 200] [--snmp]` affiche un scan complet en JSON ; les tests s'ignorent si le noyau interdit les espaces de noms.
+- [x] **Fait dans le labo** Vrai VLAN routé : autre plage, traceroute par le routeur, avertissement « aucun hôte n'a répondu » sur une plage vide
+- [x] **Fait dans le labo** VLAN étiqueté porté par la machine (`s0.30`) : trouvé tout seul, scanné par ARP (MAC, fabricant, type, n° de VLAN), adresse propre reconnue comme « cette machine » ; a révélé un scan routé trop lent (148 s → 30 s) et des VLAN rattachés scannés sans MAC (corrigés)
+- [x] **Fait dans le labo** SNMP par un vrai échange UDP (nom, ARP du routeur pour le VLAN 20, table des ports : appareil → switch + port), routeur reconnu comme switch
+- [x] **Fait dans le labo** LLDP et CDP reçus par un vrai socket `AF_PACKET` (trames émises sur le câble virtuel)
+- [x] **Fait dans le labo** Analyse de sécurité contre de vrais services : Redis ouvert/protégé, RTSP ouvert, Telnet, MQTT, SSH récent sans faux positif
+- [x] **Fait dans le labo** Gros réseau : 215 appareils trouvés en 39 s, sans avertissement
+- [ ] **P1 · S** Exécuter la CI sur GitHub : jamais vue par moi (dépôt privé) ; confirmer Python 3.12. Le test du labo s'y ignorera sans doute (Ubuntu 24.04 restreint les espaces de noms)
+- [ ] **P1 · M** Tester SNMP, LLDP/CDP et la hiérarchie sur un **vrai** switch administrable (réponses réelles : OID propriétaires, VLAN, noms de ports du fabricant)
+- [ ] **P1 · S** Tester l'analyse de sécurité sur de **vrais** appareils (caméra, NAS) : les faux positifs dépendent des micrologiciels
 - [ ] **P2 · S** Installer le `.deb` avec `apt` sur une machine propre (Debian 13 et Ubuntu 24.04) ; tester les notifications de bureau
-- [ ] **P2 · M** Tester sur un gros réseau (≥ 200 appareils) : durée du scan, fluidité de la carte
+- [ ] **P2 · S** Un vrai réseau Wi-Fi + câble pour la carte hiérarchique (le labo n'a pas de Wi-Fi)
+- [ ] **P3 · S** Compléter le labo : DHCP (baux réels), mDNS/SSDP entre machines, IPv6 (voisins), SNMP v3 (un agent v3 d'essai existe déjà dans les tests unitaires)
 
 ## 1. Fiabilité et performance
 - [x] Identité des appareils par la **MAC d'abord** (changement d'IP = événement, jamais un doublon)
@@ -81,6 +90,20 @@ effort **S** (< 1 h) · **M** (quelques heures) · **L** (plus d'une journée).
 - [x] Page de manuel `panther(1)`, complétions bash et zsh, installées par le `.deb` ; un test vérifie qu'elles listent toutes les options réelles
 - [ ] **P3 · L** Support de macOS et Windows (aujourd'hui Linux seulement : `ip`, `/proc/net/arp`, `/sys`)
 - [ ] **P3 · M** Site de documentation (captures, tutoriels, cas d'usage)
+
+## 8. Idées d'amélioration (à portée de main)
+- [ ] **P2 · M** Nommer les appareils : proposer un nom à la première apparition, surtout pour les téléphones à MAC aléatoire (aujourd'hui « device-37 »)
+- [ ] **P2 · S** Rendre le bouton « Réseaux » plus clair : « Plages à scanner », infobulle explicite, nombre masqué quand il n'apporte rien
+- [ ] **P2 · M** Résumé de la semaine sur l'accueil : appareils apparus, disparus, nouvelles expositions
+- [ ] **P2 · S** Notification **dans la fenêtre** quand un appareil inconnu apparaît (aujourd'hui : webhook ou e-mail seulement)
+- [ ] **P3 · S** Compléter la table des modèles (Mac récents, Galaxy, Pixel) quand de vrais identifiants seront vus
+
+## 9. Gros chantiers (à décider)
+- [ ] **P3 · L** Découverte et scan en IPv6 (appareils sans IPv4), plages IPv6 — voir section 2
+- [ ] **P3 · L** SNMP v3 avec chiffrement (authPriv, AES/DES) : demande une dépendance (`cryptography`) ou une implémentation AES écrite à la main
+- [ ] **P3 · L** Chiffrement réel de la base — voir section 4
+- [ ] **P3 · L** Plusieurs sites / plusieurs machines d'écoute — voir section 3
+- [ ] **P3 · L** Empreinte du système par réponses TCP/IP (sockets bruts, donc root) — voir section 2
 
 ## Ordre conseillé
 1. **Valider** : pousser sur GitHub (CI), tester sur du vrai matériel (section 0).

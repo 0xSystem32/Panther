@@ -3,11 +3,13 @@
 Découverte : sondes TCP + table ARP du noyau. Enrichissement : DNS inverse,
 NetBIOS, mDNS, scan de ports, bannières, TTL, empreinte OS, classification.
 """
+import errno
 import glob
 import html
 import ipaddress
 import logging
 import re
+import selectors
 import socket
 import ssl
 import struct
@@ -199,12 +201,45 @@ def udp_nudge(ip):
 
 
 def probe_alive(ip, timeout=0.4, ports=DISCOVERY_PORTS):
+    """Hôte vivant ? Tous les ports sont sondés EN MÊME TEMPS : un hôte muet coûte un délai, pas un délai par port
+    (254 adresses d'un VLAN routé : ~15 s au lieu de plus de 2 minutes)."""
     udp_nudge(ip)
-    for p in ports:
-        opened, refused = tcp_open(ip, p, timeout)
-        if opened or refused:
-            return True
-    return False
+    pending = {}
+    sel = selectors.DefaultSelector()
+    try:
+        for p in ports:
+            s = socket.socket()
+            s.setblocking(False)
+            try:
+                r = s.connect_ex((ip, p))
+            except OSError:
+                s.close()
+                continue
+            if r in (0, errno.ECONNREFUSED):
+                s.close()
+                return True
+            if r not in (errno.EINPROGRESS, errno.EWOULDBLOCK):
+                s.close()
+                continue
+            sel.register(s, selectors.EVENT_WRITE, s)
+            pending[s] = p
+        deadline = time.monotonic() + timeout
+        while pending:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                break
+            for key, _ in sel.select(left):
+                sock = key.data
+                if sock.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR) in (0, errno.ECONNREFUSED):
+                    return True
+                sel.unregister(sock)
+                sock.close()
+                del pending[sock]
+        return False
+    finally:
+        for s in pending:
+            s.close()
+        sel.close()
 
 
 def scan_ports(ip, ports, timeout):
@@ -473,6 +508,7 @@ class Scanner:
         self.iface = None
         self.known = {}
         self.aliases = {}
+        self.own: dict = {}  # adresses de cette machine sur les interfaces rattachées (VLAN…) : ip -> interface
         self.reset()
 
     def reset(self):
@@ -533,12 +569,15 @@ class Scanner:
                 if not n.overlaps(local) and all(not n.overlaps(e) for e in extra_nets):
                     extra_nets.append(n)
             all_nets = [local] + extra_nets
+            attached = self._attached(extra_nets, net["iface"])  # plages portées par une autre interface (VLAN étiqueté…) : ARP possible
+            self.own = {a["ip"]: a["iface"] for a in attached.values()}
             hosts = [str(h) for n in all_nets for h in (n.hosts() if n.num_addresses > 2 else n)]
             if len(hosts) > 2 * networks.MAX_HOSTS:
                 raise RuntimeError(tr("Trop d'adresses à scanner ({hosts_count}) : réduisez les plages.", hosts_count=len(hosts)))
             self._set(network=net, networks=[
                 {"cidr": str(local), "kind": "local", "vlan": net["vlan"]}]
-                + [{"cidr": str(n), "kind": "routé", "vlan": None} for n in extra_nets])
+                + [{"cidr": str(n), "kind": "interface", "vlan": attached[str(n)]["vlan"]} if str(n) in attached
+                   else {"cidr": str(n), "kind": "routé", "vlan": None} for n in extra_nets])
 
             nb = {}
             P = self.profile
@@ -552,7 +591,8 @@ class Scanner:
 
             found, done = set(), [0]
             local_hosts = [h for h in hosts if ipaddress.ip_address(h) in local]
-            routed_hosts = [h for h in hosts if h not in set(local_hosts)]
+            on_link = {h for h in hosts if any(ipaddress.ip_address(h) in ipaddress.ip_network(c) for c in attached)}
+            routed_hosts = [h for h in hosts if h not in set(local_hosts) and h not in on_link]
             arp = {}
 
             def tcp_pass(pool, timeout_of, patient):
@@ -560,7 +600,7 @@ class Scanner:
                 def disc(ip):
                     if self.cancel.is_set():
                         return
-                    if ip == net["ip"] or probe_alive(ip, timeout_of(ip), P["disc_ports"]):
+                    if ip == net["ip"] or ip in self.own or probe_alive(ip, timeout_of(ip), P["disc_ports"]):
                         found.add(ip)
                     done[0] += 1
                     self._set(progress=int(done[0] / max(len(hosts), 1) * 55))
@@ -589,6 +629,8 @@ class Scanner:
                             found.add(ip)
             else:
                 tcp_pass(local_hosts, lambda ip: P["disc_timeout"], patient=True)
+            if attached and not P.get("passive"):
+                self._discover_attached(attached, on_link, arp, found, tcp_pass)
             if routed_hosts:
                 tcp_pass(routed_hosts, lambda ip: P["routed_timeout"], patient=True)
             time.sleep(0.2)
@@ -597,6 +639,7 @@ class Scanner:
                 if ipaddress.ip_address(ip) in local:
                     found.add(ip)
             found.add(net["ip"])
+            found |= set(self.own)
             self._set(progress=62)
             snmp_arp, fdb, warnings, snmp_info = ({}, {}, [], []) if P.get("passive") else self._read_snmp(snmp_sources, all_nets, found)
             warnings = early_warnings + warnings
@@ -621,7 +664,8 @@ class Scanner:
             extra = {"ssdp": ssdp, "mdns": mdns, "wsd": wsd, "snmp_arp": snmp_arp, "leases": dhcp.read_leases(),
                      "ipv6": ipv6_neighbors(net["iface"])}
             ips = sorted(found, key=lambda i: ipaddress.ip_address(i))
-            paths = {} if P.get("passive") else self._trace_paths(extra_nets, found)
+            routed_nets = [n_ for n_ in extra_nets if str(n_) not in attached]
+            paths = {} if P.get("passive") else self._trace_paths(routed_nets, found)
             for n_ in extra_nets:
                 if not any(ipaddress.ip_address(i) in n_ for i in found):
                     hint = tr(" Dernier saut atteint : {hop}.", hop=[h for h in paths.get(str(n_), []) if h][-1]) if any(paths.get(str(n_), [])) else ""
@@ -639,7 +683,7 @@ class Scanner:
                     n[0] += 1
                     return
                 dev["network"] = net_of(ip)
-                dev["vlan"] = net["vlan"] if dev["network"] == str(local) else None
+                dev["vlan"] = net["vlan"] if dev["network"] == str(local) else attached.get(dev["network"], {}).get("vlan")
                 dev["path"] = paths.get(dev["network"], [])
                 f = fdb.get(dev["mac"])
                 if f:  # position dans le switch (lue par SNMP)
@@ -663,6 +707,37 @@ class Scanner:
         except Exception as e:
             log.exception("Le scan a échoué")
             self._set(status="error", error=str(e))
+
+    @staticmethod
+    def _attached(extra_nets, main_iface):
+        """Plages supplémentaires que cette machine porte déjà sur une autre interface : {cidr: {iface, ip, vlan}}."""
+        by_cidr = {it["cidr"]: it for it in networks.interfaces() if it["iface"] != main_iface}
+        vlans = networks.vlan_ids()
+        return {str(n): {"iface": by_cidr[str(n)]["iface"], "ip": by_cidr[str(n)]["ip"], "vlan": vlans.get(by_cidr[str(n)]["iface"])}
+                for n in extra_nets if str(n) in by_cidr}
+
+    def _discover_attached(self, attached, hosts, arp, found, tcp_pass):
+        """Découverte par ARP sur chaque interface rattachée (adresses MAC, donc constructeur et type), en parallèle."""
+        P = self.profile
+
+        def one(item):
+            cidr, at = item
+            net_ = ipaddress.ip_network(cidr)
+            pool = [h for h in hosts if ipaddress.ip_address(h) in net_]
+            alive, maybes, ok = arp_discover(at["iface"], pool, P, self.cancel)
+            return pool, alive, maybes, ok
+        with ThreadPoolExecutor(len(attached)) as ex:
+            results = list(ex.map(one, attached.items()))
+        for pool, alive, maybes, ok in results:
+            if ok:
+                arp.update(alive)
+                found.update(alive)
+                with ThreadPoolExecutor(32) as ex:
+                    for ip, up in zip(maybes, ex.map(lambda i: not self.cancel.is_set() and probe_alive(i, P["disc_timeout"], P["disc_ports"]), maybes)):
+                        if up:
+                            found.add(ip)
+            else:
+                tcp_pass(pool, lambda ip: P["routed_timeout"], patient=True)
 
     def _read_snmp(self, sources, all_nets, found):
         """Interroge les routeurs/switchs désignés par l'utilisateur. Retourne ARP, FDB, avertissements."""
@@ -726,11 +801,12 @@ class Scanner:
         return dev
 
     def _inspect(self, ip, net, arp, extra):
-        me = ip == net["ip"]
+        my_iface = net["iface"] if ip == net["ip"] else self.own.get(ip)
+        me = my_iface is not None
         mac = arp.get(ip, "") or extra.get("snmp_arp", {}).get(ip, "")
         if me:
             try:
-                mac = open(f"/sys/class/net/{net['iface']}/address").read().strip()
+                mac = open(f"/sys/class/net/{my_iface}/address").read().strip()
             except OSError:
                 pass
         P = self.profile
