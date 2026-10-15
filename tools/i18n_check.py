@@ -23,8 +23,9 @@ def _literal(node):
 def collect(pkg=PKG):
     """-> ({clé: [(fichier, ligne)]}, [(fichier, ligne, source)] des appels dont l'argument n'est pas une chaîne littérale)."""
     keys, dynamic = {}, []
-    for name in sorted(os.listdir(pkg)):
-        if not name.endswith(".py") or name == "lang_en.py":
+    files = sorted(os.path.relpath(os.path.join(d, f), pkg) for d, _dirs, fs_ in os.walk(pkg) for f in fs_ if f.endswith(".py"))
+    for name in files:
+        if os.path.basename(name) == "lang_en.py":
             continue
         path = os.path.join(pkg, name)
         with open(path, encoding="utf-8") as f:

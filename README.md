@@ -114,7 +114,8 @@ change its type or mark it as trusted. The language is chosen in the *View → L
 | `layout.py` | topology tree and hierarchical layout |
 | `demo.py` | demo mode: fictional network, fake scan engine, temporary configuration |
 | `i18n.py`, `lang_en.py`, `labels.py` | translation (French source text, English catalogue), device-type labels |
-| `gui.py`, `reportpdf.py`, `log.py` | Qt window, PDF report, error log |
+| `ui/` (`theme`, `icons`, `util`, `widgets`, `mapview`, `dialogs`, `settings_dialogs`, `wizard`, `window` + one mixin per role: `scan`, `mapctl`, `tables`, `panel`, `devices`, `reports`, `prefs`; `app`), `gui.py` | Qt interface, split by role (`gui.py` only re-exports the public names) |
+| `reportpdf.py`, `log.py` | PDF report, error log |
 | `server.py`, `static/` | local web interface |
 
 Data: `~/.config/Panther/` (`panther.db` = history, `devices.json` = names and types set by hand, `rules.json` = detection

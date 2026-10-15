@@ -114,7 +114,8 @@ pour le renommer, changer son type ou le marquer de confiance. La langue (franç
 | `layout.py` | arbre de la topologie et disposition hiérarchique |
 | `demo.py` | mode démonstration : réseau fictif, faux moteur de scan, configuration temporaire |
 | `i18n.py`, `lang_en.py`, `labels.py` | traduction (texte source français, catalogue anglais), libellés des types d'appareils |
-| `gui.py`, `reportpdf.py`, `log.py` | fenêtre Qt, rapport PDF, journal d'erreurs |
+| `ui/` (`theme`, `icons`, `util`, `widgets`, `mapview`, `dialogs`, `settings_dialogs`, `wizard`, `window` + un mixin par rôle : `scan`, `mapctl`, `tables`, `panel`, `devices`, `reports`, `prefs` ; `app`), `gui.py` | interface Qt découpée par rôle (`gui.py` ne fait que réexporter les noms publics) |
+| `reportpdf.py`, `log.py` | rapport PDF, journal d'erreurs |
 | `server.py`, `static/` | interface web locale |
 
 Données : `~/.config/Panther/` (`panther.db` = historique, `devices.json` = noms et types choisis à la main,

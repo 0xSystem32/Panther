@@ -65,7 +65,7 @@ effort **S** (< 1 h) · **M** (quelques heures) · **L** (plus d'une journée).
 - [x] Assistant de premier lancement (langue, usage responsable obligatoire, apparence, profondeur, écoute seule, analyse de sécurité, scan automatique) ; Aide → Assistant pour le rouvrir
 
 ## 6. Qualité du code
-- [ ] **P1 · L** Découper `gui.py` (≈ 1 800 lignes) en modules : carte, dialogues, fenêtre principale
+- [x] `gui.py` (3 400 lignes) découpé en package `panther/ui/` : 9 modules + 7 mixins pour la fenêtre principale (le plus grand : 447 lignes) ; `gui.py` réexporte les noms publics. Le découpage a révélé un chemin d'icône cassé, désormais couvert par un test
 - [ ] **P2 · M** Typage (`mypy`) et analyse statique (`ruff`) dans la CI
 - [ ] **P2 · M** Couverture de tests mesurée (objectif ≥ 85 % sur le moteur) et tests « fuzz » des analyseurs (mDNS, SNMP, LLDP, bannières)
 - [ ] **P2 · S** Tests de performance (carte avec 250 nœuds, scan simulé)

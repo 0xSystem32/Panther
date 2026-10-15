@@ -9,9 +9,10 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 HAS_QT = importlib.util.find_spec("PyQt6") is not None
 
 if HAS_QT:
-    from PyQt6.QtCore import QSettings, Qt
-    from PyQt6.QtWidgets import QApplication, QTableWidget, QWidget
+    from PyQt6.QtCore import QPointF, QSettings, Qt
+    from PyQt6.QtWidgets import QApplication, QMenu, QTableWidget, QWidget
 
+    from panther.ui import dialogs, theme
     from panther import alerts, compare, gui, history, ouiupdate, reportpdf, rules, schedule, secrets, security, store, wol
 
 NET = "192.168.1.0/24"
@@ -351,18 +352,18 @@ class GuiTests(unittest.TestCase):
         w = self.w
         labels = []
         import panther.gui as g
-        orig = g.QMenu.exec
-        g.QMenu.exec = lambda self_, pos=None: labels.extend(a.text() for a in self_.actions())
+        orig = QMenu.exec
+        QMenu.exec = lambda self_, pos=None: labels.extend(a.text() for a in self_.actions())
         try:
-            w.device_menu(w.devices[2], g.QPointF(0, 0).toPoint())
+            w.device_menu(w.devices[2], QPointF(0, 0).toPoint())
             self.assertFalse(any("Fusionner" in x for x in labels))                   # tous en ligne : rien à fusionner
             labels.clear()
             self.duplicate_scenario()
             new = next(d for d in w.devices if d["hostname"] == "iphone" and d["online"])
-            w.device_menu(new, g.QPointF(0, 0).toPoint())
+            w.device_menu(new, QPointF(0, 0).toPoint())
             self.assertTrue(any("Fusionner avec un appareil hors ligne" in x for x in labels))
         finally:
-            g.QMenu.exec = orig
+            QMenu.exec = orig
 
     # --- données et purge
     def test_data_dialog_shows_size_and_purges_old_history(self):
@@ -459,12 +460,12 @@ class GuiTests(unittest.TestCase):
         logfile = os.path.join(self.tmp.name, "panther.log")
         with open(logfile, "w") as f:
             f.write("192.168.1.20 tv\n")
-        old, gui.log_path = gui.log_path, (lambda: logfile)
+        old, dialogs.log_path = dialogs.log_path, (lambda: logfile)
         try:
             dlg = gui.DataDialog(90, 365, self.w)
             dlg.erase_everything()
         finally:
-            gui.log_path = old
+            dialogs.log_path = old
         self.assertTrue(dlg.erased)
         self.assertEqual(history.db_stats()["devices"], 0)
         self.assertEqual((store.load(), os.path.getsize(logfile)), ({}, 0))
@@ -725,14 +726,14 @@ class GuiTests(unittest.TestCase):
         self.assertGreaterEqual(self.contrast(t["mut"], t["bg"]), 7.0)
 
     def test_theme_modes_resolve_and_persist(self):
-        old = gui.system_theme
+        old = theme.system_theme
         try:
-            gui.system_theme = lambda: "light"
+            theme.system_theme = lambda: "light"
             self.assertEqual((gui.resolve_theme("auto"), gui.resolve_theme("dark"), gui.resolve_theme("contrast"), gui.resolve_theme("zzz")),
                              ("light", "dark", "contrast", "dark"))
             self.w.set_theme_mode("auto")
             self.assertEqual((self.w.settings.value("theme"), gui.T["bg"]), ("auto", gui.THEMES["light"]["bg"]))
-            gui.system_theme = lambda: "dark"
+            theme.system_theme = lambda: "dark"
             self.w.on_system_theme()                                                              # le système passe en sombre : « auto » suit
             self.assertEqual(gui.T["bg"], gui.THEMES["dark"]["bg"])
             self.w.set_theme_mode("light")
@@ -744,14 +745,14 @@ class GuiTests(unittest.TestCase):
             self.w.set_theme_mode("nimportequoi")
             self.assertEqual(self.w.theme_mode, "auto")
         finally:
-            gui.system_theme = old
+            theme.system_theme = old
 
     def test_text_size_scales_the_interface_and_the_map(self):
         self.scan(self.map_devices(4))
         node = next(iter(self.w.nodes.values()))
         base_pt, base_h = self.app.font().pointSizeF(), node.boundingRect().height()
         self.w.set_text_size("xlarge")
-        self.assertEqual((self.w.settings.value("text_size"), gui.FONT_SCALE), ("xlarge", 1.4))
+        self.assertEqual((self.w.settings.value("text_size"), theme.FONT_SCALE), ("xlarge", 1.4))
         self.assertAlmostEqual(self.app.font().pointSizeF(), base_pt * 1.4, places=1)
         self.assertGreater(next(iter(self.w.nodes.values())).boundingRect().height(), base_h)    # la zone du nom grandit avec la police
         self.assertIn("22px", gui.make_style())                                                   # 16 px × 1,4
@@ -880,6 +881,12 @@ class GuiTests(unittest.TestCase):
         finally:
             gui.WelcomeWizard.exec = old
         self.assertEqual((self.w.theme_mode, self.w.passive_on, self.w.depth.currentData()), before)
+
+    def test_package_resources_are_found_from_the_ui_subpackage(self):
+        from panther.ui import app
+        self.assertTrue(os.path.isfile(app.ICON))
+        self.assertTrue(os.path.isfile(os.path.join(app.PACKAGE_DIR, "oui.txt")))
+        self.assertTrue(os.path.isdir(os.path.join(app.PACKAGE_DIR, "static")))
 
     # --- anglais
     FRENCH = __import__("re").compile(r"[àâçéèêëîïôùûüœ]|\b(appareils?|réseaux?|lancez|aucun[e]?|erreur|impossible|enregistr\w+|choisissez|dossier|fichier|"
@@ -1174,17 +1181,17 @@ class GuiTests(unittest.TestCase):
         w = self.w
         labels = []
         import panther.gui as g
-        orig = g.QMenu.exec
-        g.QMenu.exec = lambda self_, pos=None: labels.extend(a.text() for a in self_.actions())
+        orig = QMenu.exec
+        QMenu.exec = lambda self_, pos=None: labels.extend(a.text() for a in self_.actions())
         try:
-            w.device_menu(w.devices[2], g.QPointF(0, 0).toPoint())
+            w.device_menu(w.devices[2], QPointF(0, 0).toPoint())
             self.assertFalse(any("Wake-on-LAN" in x for x in labels))
             labels.clear()
             off = self.offline_device(); w.devices.append(off)
-            w.device_menu(off, g.QPointF(0, 0).toPoint())
+            w.device_menu(off, QPointF(0, 0).toPoint())
             self.assertTrue(any("Wake-on-LAN" in x for x in labels))
         finally:
-            g.QMenu.exec = orig
+            QMenu.exec = orig
 
     def wait_oui(self, w, timeout=5):
         end = time.time() + timeout
